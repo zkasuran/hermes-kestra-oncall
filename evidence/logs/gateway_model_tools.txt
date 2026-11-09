@@ -162,3 +162,32 @@
 2026-11-09 12:45:54,942 INFO agent.tool_executor: tool kestra_incidents completed (0.00s, 6648 chars)
 2026-11-09 12:46:17,816 INFO agent.chat_completion_helpers: Fallback activated: gpt-6.1-sol → gpt-5.6-sol (custom:agentrouter)
 2026-11-09 12:46:26,291 INFO agent.tool_executor: tool kestra_incidents completed (0.01s, 1300 chars)
+2026-11-09 13:03:27,457 INFO aiohttp.access: 10.250.90.2 [09/Nov/2026:13:03:27 +0530] "POST /webhooks/kestra-oncall HTTP/1.1" 202 292 "-" "Kestra"
+2026-11-09 13:03:30,330 INFO aiohttp.access: 10.250.90.2 [09/Nov/2026:13:03:30 +0530] "POST /webhooks/kestra-oncall HTTP/1.1" 202 292 "-" "Kestra"
+2026-11-09 13:03:32,459 INFO gateway.platforms.webhook_coalesce: [webhook] coalesce settled group=kestra-oncall|3B4DkIMzndVTxtmb6LVTRW events=1 delivery=3B4DkIMzndVTxtmb6LVTRW
+2026-11-09 13:03:35,332 INFO gateway.platforms.webhook_coalesce: [webhook] coalesce settled group=kestra-oncall|1iV7jCJ41qjhkSEohbyDW6 events=1 delivery=1iV7jCJ41qjhkSEohbyDW6
+2026-11-09 13:03:52,332 INFO agent.tool_executor: tool kestra_incident_open completed (0.03s, 3922 chars)
+2026-11-09 13:03:52,341 INFO agent.tool_executor: tool kestra_status completed (0.01s, 505 chars)
+2026-11-09 13:04:01,305 INFO agent.tool_executor: tool kestra_incident_open completed (0.02s, 1322 chars)
+2026-11-09 13:04:11,655 INFO agent.tool_executor: tool kestra_incidents completed (0.00s, 3900 chars)
+2026-11-09 13:04:16,409 INFO agent.tool_executor: tool kestra_status completed (0.01s, 505 chars)
+2026-11-09 13:04:16,416 INFO agent.tool_executor: tool kestra_incidents completed (0.00s, 1300 chars)
+2026-11-09 13:04:29,804 INFO agent.tool_executor: tool kestra_propose_fix completed (0.02s, 1497 chars)
+2026-11-09 13:04:36,020 INFO agent.tool_executor: tool kestra_incidents completed (0.01s, 6672 chars)
+2026-11-09 13:21:23,668 INFO aiohttp.access: 10.250.90.2 [09/Nov/2026:13:21:23 +0530] "POST /webhooks/kestra-oncall HTTP/1.1" 202 292 "-" "Kestra"
+2026-11-09 13:21:26,088 INFO aiohttp.access: 10.250.90.2 [09/Nov/2026:13:21:26 +0530] "POST /webhooks/kestra-oncall HTTP/1.1" 202 292 "-" "Kestra"
+2026-11-09 13:21:28,669 INFO gateway.platforms.webhook_coalesce: [webhook] coalesce settled group=kestra-oncall|1t3YKXg4A9SC7oEwQavSOL events=1 delivery=1t3YKXg4A9SC7oEwQavSOL
+2026-11-09 13:21:31,090 INFO gateway.platforms.webhook_coalesce: [webhook] coalesce settled group=kestra-oncall|7MDtmNRaRgFTsWeuzmBqJm events=1 delivery=7MDtmNRaRgFTsWeuzmBqJm
+2026-11-09 13:21:44,972 INFO agent.tool_executor: tool kestra_incident_open completed (0.05s, 3929 chars)
+2026-11-09 13:22:01,073 INFO agent.tool_executor: tool kestra_status completed (0.01s, 505 chars)
+2026-11-09 13:22:01,082 INFO agent.tool_executor: tool kestra_incidents completed (0.01s, 3907 chars)
+2026-11-09 13:22:10,349 INFO agent.chat_completion_helpers: Fallback activated: gpt-6-astra → gpt-6.1-sol (custom:agentrouter)
+2026-11-09 13:22:14,525 INFO agent.tool_executor: tool kestra_propose_fix completed (0.02s, 1417 chars)
+2026-11-09 13:22:19,146 INFO agent.tool_executor: tool kestra_incident_open completed (0.01s, 1323 chars)
+2026-11-09 13:22:19,596 INFO aiohttp.access: 192.168.1.4 [09/Nov/2026:13:22:19 +0530] "POST /webhooks/kestra-oncall HTTP/1.1" 401 218 "-" "Python-urllib/3.14"
+2026-11-09 13:22:19,598 INFO aiohttp.access: 192.168.1.4 [09/Nov/2026:13:22:19 +0530] "POST /webhooks/kestra-oncall HTTP/1.1" 401 218 "-" "Python-urllib/3.14"
+2026-11-09 13:22:19,600 INFO gateway.platforms.webhook: [webhook] Skipping duplicate delivery 1t3YKXg4A9SC7oEwQavSOL on route kestra-oncall
+2026-11-09 13:22:19,601 INFO aiohttp.access: 192.168.1.4 [09/Nov/2026:13:22:19 +0530] "POST /webhooks/kestra-oncall HTTP/1.1" 200 242 "-" "Python-urllib/3.14"
+2026-11-09 13:22:21,896 INFO agent.tool_executor: tool kestra_incidents completed (0.01s, 6599 chars)
+2026-11-09 13:22:52,810 INFO agent.tool_executor: tool kestra_incidents completed (0.01s, 1300 chars)
+2026-11-09 13:22:52,821 INFO agent.tool_executor: tool kestra_status completed (0.01s, 520 chars)

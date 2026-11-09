@@ -83,9 +83,21 @@ def git_state() -> dict:
     marker = ROOT / 'evidence/e2e-run-commit.txt'
     e2e_commit = marker.read_text().split()[0] if marker.exists() else ''
     dirty = [l for l in run('status', '--porcelain', '--untracked-files=no', '--', *RUNTIME_PATHS).splitlines() if l]
-    changed = [l for l in run('diff', '--name-only', e2e_commit, 'HEAD', '--', *RUNTIME_PATHS).splitlines() if l] if e2e_commit else ['(no evidence/e2e-run-commit.txt)']
+    results_path = ROOT / 'evidence/e2e-results.json'
+    results = json.loads(results_path.read_text()) if results_path.exists() else {}
+    commits = results.get('scenario_commits') or ({} if not e2e_commit else {'*': e2e_commit})
+    declared = set((results.get('unaffected_runtime_changes') or {}).get('files', []))
+    changed: list[str] = []
+    for commit in sorted(set(commits.values())) or ['']:
+        if not commit:
+            changed.append('(no evidence/e2e-run-commit.txt)')
+            continue
+        for path in run('diff', '--name-only', commit, 'HEAD', '--', *RUNTIME_PATHS).splitlines():
+            if path and path not in declared and path not in changed:
+                changed.append(path)
     return {'commit': run('rev-parse', 'HEAD'), 'tree': run('rev-parse', 'HEAD^{tree}'), 'e2e_ran_on_commit': e2e_commit,
-            'runtime_files_changed_since_e2e': changed, 'dirty_tracked_files': dirty,
+            'runtime_files_changed_since_e2e': changed, 'scenario_commits': commits,
+            'declared_unaffected_changes': results.get('unaffected_runtime_changes'), 'dirty_tracked_files': dirty,
             'branch': run('rev-parse', '--abbrev-ref', 'HEAD'), 'commit_subject': run('log', '-1', '--format=%s')}
 
 

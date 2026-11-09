@@ -37,7 +37,7 @@ def main() -> None:
     lines.append(f"Kestra {results['kestra_version']}, Hermes `{(manifest.get('versions') or {}).get('hermes_commit', '?')[:10]}` (main), plugin commit "
                  f"`{commit.get('commit', '?')[:12]}`{' (DRAFT: tracked files differ from this commit)' if manifest.get('draft') else ''}. "
                  f"Run on {results['started']}, {results['seconds']} s, {'all passed' if results['all_passed'] else 'FAILURES'}.")
-    lines += ['', '| Scenario | What it proves | Assertions | Key ids |', '|---|---|---|---|']
+    lines += ['', '| Scenario | What it proves | Assertions | Ran on commit | Key ids |', '|---|---|---|---|---|']
     total_ok = total = 0
     for sid in ORDER:
         s = by.get(sid)
@@ -46,8 +46,11 @@ def main() -> None:
         ok = sum(a['ok'] for a in s['assertions'])
         total_ok += ok
         total += len(s['assertions'])
-        lines.append(f"| {sid} | {s['title']} | {ok}/{len(s['assertions'])} {'PASS' if s['passed'] else 'FAIL'} | {flat_ids(s['ids'])} |")
+        lines.append(f"| {sid} | {s['title']} | {ok}/{len(s['assertions'])} {'PASS' if s['passed'] else 'FAIL'} | `{(results.get('scenario_commits') or {}).get(sid, commit.get('e2e_ran_on_commit', '?'))[:7]}` | {flat_ids(s['ids'])} |")
     lines += ['', f'Total: {total_ok}/{total} assertions.', '']
+    un = results.get('unaffected_runtime_changes')
+    if un:
+        lines += [f"Scenarios not re-run after the last runtime change ({', '.join(un['files'])}): {', '.join(un['applies_to_scenarios_not_rerun'])}. {un['reason']}", '']
     extra = ROOT / 'evidence/v023-results.json'
     if extra.exists():
         v = json.loads(extra.read_text())

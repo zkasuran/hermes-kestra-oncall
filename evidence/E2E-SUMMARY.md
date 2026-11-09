@@ -1,25 +1,27 @@
 # End-to-end summary
 
-Kestra 2.0.9, Hermes `c3354ea199` (main), plugin commit `6d7e9f852c01`. Run on 2026-11-09T12:44:40+0530, 345.8 s, all passed.
+Kestra 2.0.9, Hermes `c3354ea199` (main), plugin commit `59c2bd7fa3cd`. Run on 2026-11-09T12:44:40+0530, 327.9 s, all passed.
 
-| Scenario | What it proves | Assertions | Key ids |
-|---|---|---|---|
-| S1 | detect: failure -> forwarder -> Hermes webhook run (real LLM) -> incident + proposal; healthy, lookalike, protected create no proposal | 19/19 PASS | failing=7eZeCyhn4dSx05ZFsFc3IF<br>incident=INC-fc91a049 |
-| S1b | webhook hardening: wrong token rejected, duplicate delivery ignored, a failure of the forwarder namespace never loops | 6/6 PASS |  |
-| S2 | approve and repair: deny, unattended refusal, then approved apply -> one revision, one replay from transform, extract reused, load ran | 25/25 PASS | original_execution=7eZeCyhn4dSx05ZFsFc3IF<br>replay_execution=3UfvbR34JO0ayEkwdLQ7oC |
-| S3 | idempotent retry: apply the same proposal again -> no revision, no replay, no journal growth | 5/5 PASS |  |
-| S4 | stale proposal: flow edited out of band after propose -> apply refused, no write | 11/11 PASS | original_execution=27Y9fXCnHFSF1pl7wvb9Ih<br>incident=INC-6b8998f6 |
-| S5 | rollback: a proposal that validates but still fails -> replay FAILED -> flow back to the base source | 12/12 PASS | original_execution=7EO9Qj19uReLekpytcFfmJ<br>incident=INC-31c4e566<br>replay_execution=686W4sZhETVpo3ah9OJGL3 |
-| S6a | interrupted apply, phase 1: process killed after the flow update, before the replay | 8/8 PASS | original_execution=5a1w2KKb9DgPOUZAk6tbCL<br>incident=INC-99a5be32 |
-| S6b | interrupted apply, phase 2: next apply adopts the written fix and does exactly one replay | 15/15 PASS | original_execution=5a1w2KKb9DgPOUZAk6tbCL<br>replay_execution=cdy3rYv0ri9m0nkDuJYeF |
-| S7 | pause: PAUSED refund_approval appears in /kestra pauses, resumes with inputs, downstream sees them; stale guard when resumed out of band first | 18/18 PASS | execution=BkQY3FS0wqj2W0Gpwz1nt<br>stale_execution=2cvV6tfHiL5jIU0OiOaHT7<br>killed_execution=5G1G5lLA5gDh8R9cBN35be |
-| S8 | concurrent apply: two sessions approve the same proposal at the same moment -> one write, one replay | 8/8 PASS | original_execution=7rOMGeno2d3OGSWTN7Gv0<br>incident=INC-90fc69fe<br>replay_execution=2Fu06QQNK62ye4CWeavm6Z |
-| S9 | slow replay: apply returns pending after the wait, the fix is NOT rolled back, the next apply follows the same replay and verifies | 21/21 PASS | original_execution=4QZSE7ibIh9BnsfEtbCX6q<br>replay_execution=4Fhdiudla0tJWyvzlaQKga<br>incident=INC-998f8631 |
-| S10 | chat surface: the typed command works where no Hermes approval card can exist (telegram session, no notifier) | 7/7 PASS | incident=INC-80f0203c<br>original_execution=31pmDEgExmQPn28GzCPos |
-| S11 | flow shapes: Parallel branch (fixed and verified), Loop and Subflow (diagnose-only, honest refusal), replay that reaches a Pause (pending then verified), failure that is not a task failure (refused) | 26/26 PASS | parallel: execution=3oWRJKy24PunwF4iinOvZM, replay=QWdXfyQze9sQzy9n80Two<br>loop: execution=2k8c5woov6sDZwkwgsbiKO<br>subflow: parent_execution=4JOh2pgg17C3w8srOFErNe<br>pause_after: execution=3PIbap6H3MqFMRwHk4IZRi, replay=6tnAldlOsH7mYueFqQJJcQ<br>allow_failure: execution=7KMIpThBZ59UT1mTKc9Ngz, replay=2cvVudRpyEapSwW2xQteKl |
-| S12 | real terminal UI: slash commands typed into the actual `hermes chat --cli` in a pseudo-terminal (no scripted callback, no model turn) | 8/8 PASS | incident=INC-e3667dbb<br>original_execution=1CrgckQF9i9UDrmbh0kgN5 |
+| Scenario | What it proves | Assertions | Ran on commit | Key ids |
+|---|---|---|---|---|
+| S1 | detect: failure -> forwarder -> Hermes webhook run (real LLM) -> incident + proposal; healthy, lookalike, protected create no proposal | 19/19 PASS | `59c2bd7` | failing=1t3YKXg4A9SC7oEwQavSOL<br>incident=INC-266c898e |
+| S1b | webhook hardening: wrong token rejected, duplicate delivery ignored, a failure of the forwarder namespace never loops | 6/6 PASS | `59c2bd7` |  |
+| S2 | approve and repair: deny, unattended refusal, then approved apply -> one revision, one replay from transform, extract reused, load ran | 25/25 PASS | `59c2bd7` | original_execution=1t3YKXg4A9SC7oEwQavSOL<br>replay_execution=1VgpjY37nojTzwImf4iNjq |
+| S3 | idempotent retry: apply the same proposal again -> no revision, no replay, no journal growth | 5/5 PASS | `59c2bd7` |  |
+| S4 | stale proposal: flow edited out of band after propose -> apply refused, no write | 11/11 PASS | `6d7e9f8` | original_execution=27Y9fXCnHFSF1pl7wvb9Ih<br>incident=INC-6b8998f6 |
+| S5 | rollback: a proposal that validates but still fails -> replay FAILED -> flow back to the base source | 12/12 PASS | `6d7e9f8` | original_execution=7EO9Qj19uReLekpytcFfmJ<br>incident=INC-31c4e566<br>replay_execution=686W4sZhETVpo3ah9OJGL3 |
+| S6a | interrupted apply, phase 1: process killed after the flow update, before the replay | 8/8 PASS | `6d7e9f8` | original_execution=5a1w2KKb9DgPOUZAk6tbCL<br>incident=INC-99a5be32 |
+| S6b | interrupted apply, phase 2: next apply adopts the written fix and does exactly one replay | 15/15 PASS | `6d7e9f8` | original_execution=5a1w2KKb9DgPOUZAk6tbCL<br>replay_execution=cdy3rYv0ri9m0nkDuJYeF |
+| S7 | pause: PAUSED refund_approval appears in /kestra pauses, resumes with inputs, downstream sees them; stale guard when resumed out of band first | 18/18 PASS | `6d7e9f8` | execution=BkQY3FS0wqj2W0Gpwz1nt<br>stale_execution=2cvV6tfHiL5jIU0OiOaHT7<br>killed_execution=5G1G5lLA5gDh8R9cBN35be |
+| S8 | concurrent apply: two sessions approve the same proposal at the same moment -> one write, one replay | 8/8 PASS | `6d7e9f8` | original_execution=7rOMGeno2d3OGSWTN7Gv0<br>incident=INC-90fc69fe<br>replay_execution=2Fu06QQNK62ye4CWeavm6Z |
+| S9 | slow replay: apply returns pending after the wait, the fix is NOT rolled back, the next apply follows the same replay and verifies | 21/21 PASS | `6d7e9f8` | original_execution=4QZSE7ibIh9BnsfEtbCX6q<br>replay_execution=4Fhdiudla0tJWyvzlaQKga<br>incident=INC-998f8631 |
+| S10 | chat surface: the typed command works where no Hermes approval card can exist (telegram session, no notifier) | 7/7 PASS | `6d7e9f8` | incident=INC-80f0203c<br>original_execution=31pmDEgExmQPn28GzCPos |
+| S11 | flow shapes: Parallel branch (fixed and verified), Loop and Subflow (diagnose-only, honest refusal), replay that reaches a Pause (pending then verified), failure that is not a task failure (refused) | 26/26 PASS | `6d7e9f8` | parallel: execution=3oWRJKy24PunwF4iinOvZM, replay=QWdXfyQze9sQzy9n80Two<br>loop: execution=2k8c5woov6sDZwkwgsbiKO<br>subflow: parent_execution=4JOh2pgg17C3w8srOFErNe<br>pause_after: execution=3PIbap6H3MqFMRwHk4IZRi, replay=6tnAldlOsH7mYueFqQJJcQ<br>allow_failure: execution=7KMIpThBZ59UT1mTKc9Ngz, replay=2cvVudRpyEapSwW2xQteKl |
+| S12 | real terminal UI: slash commands typed into the actual `hermes chat --cli` in a pseudo-terminal (no scripted callback, no model turn) | 8/8 PASS | `6d7e9f8` | incident=INC-e3667dbb<br>original_execution=1CrgckQF9i9UDrmbh0kgN5 |
 
 Total: 189/189 assertions.
+
+Scenarios not re-run after the last runtime change (cli.py): S6a, S4, S5, S7, S8, S9, S10, S11, S12, S6b. cli.py only holds the webhook route prompt text printed by 'hermes kestra-oncall setup' and installed by 'setup --apply'; only the model-driven webhook run (S1 to S3, re-run) reads it. S4 to S12 call the tools and /kestra commands in-process, never through that route.
 
 Hermes v0.23.0 compatibility run (scenarios S1, S1b, S2, S3): all passed, S1 19/19, S1b 6/6, S2 25/25, S3 5/5.
 

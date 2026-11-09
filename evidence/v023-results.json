@@ -1,10 +1,10 @@
 {
   "kestra_version": "2.0.9",
-  "started": "2026-11-09T12:52:07+0530",
-  "seconds": 121.2,
+  "started": "2026-11-09T13:25:19+0530",
+  "seconds": 114.7,
   "forwarder": {
-    "revision_before": 62,
-    "revision_after": 62,
+    "revision_before": 70,
+    "revision_after": 70,
     "disabled_during_S4_S5_S6_to_keep_the_model_out_of_scripted_proposals": true
   },
   "all_passed": true,
@@ -13,21 +13,21 @@
       "id": "S1",
       "title": "detect: failure -> forwarder -> Hermes webhook run (real LLM) -> incident + proposal; healthy, lookalike, protected create no proposal",
       "passed": true,
-      "seconds": 64.0,
+      "seconds": 59.2,
       "ids": {
-        "failing": "18dqLcIUTw7RP5cCuvcHrl",
-        "healthy": "2r5J6ML2CiM8dG8vbODKp3",
-        "lookalike": "24iSD3GtTODCzrMkIs9pGM",
-        "protected": "1ftzxjTRDdTzWeCYn7Vc58",
+        "failing": "1cNKdc3eqrYnozYCW9NH25",
+        "healthy": "3fgs20Uo1DTvoFxiVHergy",
+        "lookalike": "1KIzadZbVq3ByhnEIjll5Q",
+        "protected": "SmlaaKar0Cr6c4Tnebylc",
         "forwarder_executions": {
-          "1ftzxjTRDdTzWeCYn7Vc58": "7BiNW4bgOfzBs2gxCfaFrs",
-          "18dqLcIUTw7RP5cCuvcHrl": "4rXXf5RvjlyEzbcIYhjI81"
+          "SmlaaKar0Cr6c4Tnebylc": "EHigDWogHHerjXnXqD7eL",
+          "1cNKdc3eqrYnozYCW9NH25": "3BkuVvGaXcJRb3eP4npL1k"
         },
-        "incident": "INC-5ac79d8e",
-        "protected_incident": "INC-9ed302de"
+        "incident": "INC-cc32b6b7",
+        "protected_incident": "INC-10d2ad13"
       },
       "notes": [
-        "seconds from trigger to proposal: 64"
+        "seconds from trigger to proposal: 59"
       ],
       "assertions": [
         {
@@ -44,24 +44,24 @@
           "name": "forwarder fired for orders_etl and protected_ledger",
           "ok": true,
           "detail": [
-            "18dqLcIUTw7RP5cCuvcHrl",
-            "1ftzxjTRDdTzWeCYn7Vc58"
+            "1cNKdc3eqrYnozYCW9NH25",
+            "SmlaaKar0Cr6c4Tnebylc"
           ]
         },
         {
           "name": "forwarder did NOT fire for healthy_report or the hko.lookalike failure",
           "ok": true,
           "detail": [
-            "18dqLcIUTw7RP5cCuvcHrl",
-            "1ftzxjTRDdTzWeCYn7Vc58"
+            "1cNKdc3eqrYnozYCW9NH25",
+            "SmlaaKar0Cr6c4Tnebylc"
           ]
         },
         {
           "name": "each forwarder run succeeded (webhook accepted)",
           "ok": true,
           "detail": {
-            "1ftzxjTRDdTzWeCYn7Vc58": "SUCCESS",
-            "18dqLcIUTw7RP5cCuvcHrl": "SUCCESS"
+            "SmlaaKar0Cr6c4Tnebylc": "SUCCESS",
+            "1cNKdc3eqrYnozYCW9NH25": "SUCCESS"
           }
         },
         {
@@ -87,7 +87,7 @@
         {
           "name": "proposal is the one-line column fix",
           "ok": true,
-          "detail": "--- orders_etl rev 41\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n"
+          "detail": "--- orders_etl rev 52\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n"
         },
         {
           "name": "proposal stats: 1 line added, 1 removed",
@@ -100,7 +100,7 @@
         {
           "name": "unattended run did not change the flow",
           "ok": true,
-          "detail": 41
+          "detail": 52
         },
         {
           "name": "no replay exists yet (nothing applied by the webhook run)",
@@ -128,7 +128,7 @@
         {
           "name": "protected_ledger flow untouched (revision unchanged)",
           "ok": true,
-          "detail": 31
+          "detail": 39
         },
         {
           "name": "lookalike (hko.lookalike) refused by namespace policy",
@@ -142,7 +142,7 @@
           "name": "healthy SUCCESS execution refused (not FAILED)",
           "ok": true,
           "detail": {
-            "error": "Execution 2r5J6ML2CiM8dG8vbODKp3 is SUCCESS, not FAILED. Only failed executions become incidents.",
+            "error": "Execution 3fgs20Uo1DTvoFxiVHergy is SUCCESS, not FAILED. Only failed executions become incidents.",
             "hint": "Check settings or refresh the incident/pause and review a fresh proposal."
           }
         },
@@ -157,9 +157,9 @@
       "id": "S1b",
       "title": "webhook hardening: wrong token rejected, duplicate delivery ignored, a failure of the forwarder namespace never loops",
       "passed": true,
-      "seconds": 41.9,
+      "seconds": 42.0,
       "ids": {
-        "selffail_execution": "1fgFTJi8Fa5BRS8feoVpKr"
+        "selffail_execution": "WtZWswu2fe4oCcvtzSooN"
       },
       "notes": [],
       "assertions": [
@@ -180,7 +180,7 @@
             "status": 200,
             "payload": {
               "status": "duplicate",
-              "delivery_id": "18dqLcIUTw7RP5cCuvcHrl"
+              "delivery_id": "1cNKdc3eqrYnozYCW9NH25"
             }
           }
         },
@@ -197,7 +197,7 @@
           "ok": true,
           "detail": [
             [
-              "7kYgUjIpIGZsyPHvNgo9d3",
+              "2AMryJiOXp2uBTohWtWbG0",
               "SUCCESS"
             ]
           ]
@@ -215,10 +215,10 @@
       "id": "S2",
       "title": "approve and repair: deny, unattended refusal, then approved apply -> one revision, one replay from transform, extract reused, load ran",
       "passed": true,
-      "seconds": 12.4,
+      "seconds": 10.7,
       "ids": {
-        "original_execution": "18dqLcIUTw7RP5cCuvcHrl",
-        "replay_execution": "1hF1moWsHLhcOUJrFHaSgt"
+        "original_execution": "1cNKdc3eqrYnozYCW9NH25",
+        "replay_execution": "q1D4L5WD1MSJIVqqZC0P1"
       },
       "notes": [],
       "assertions": [
@@ -230,19 +230,19 @@
         {
           "name": "typed apply with a hash that is not the stored proposal: refused, nothing written",
           "ok": true,
-          "detail": "The hash deadbeef0000 does not match the stored proposal for INC-5ac79d8e (it may have changed since you looked). Nothing was written. Run /kestra show INC-5ac79d8e and type the printed command."
+          "detail": "The hash deadbeef0000 does not match the stored proposal for INC-cc32b6b7 (it may have changed since you looked). Nothing was written. Run /kestra show INC-cc32b6b7 and type the printed command."
         },
         {
           "name": "model tool path, human DENY on the approval card: nothing written",
           "ok": true,
           "detail": {
-            "error": "BLOCKED: User denied this potentially dangerous action (matched 'Apply fix for INC-5ac79d8e to hko.demo.orders_etl?\nBase revision: 41\nDiff stat: {\"added\": 1, \"removed\": 1}\nSummary: tasks added none; removed none; changed ['transform']; triggers unchanged; top-level sections changed ['tasks']\nProposal SHA-256: 908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e\nDiff (untrusted flow text, shown in full):\n--- orders_etl rev 41\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n\nWrites one flow revision and replays the failed task. On failure, rollback may restore the base source.'). Do NOT retry \u2014 the user has explicitly rejected it."
+            "error": "BLOCKED: User denied this potentially dangerous action (matched 'Apply fix for INC-cc32b6b7 to hko.demo.orders_etl?\nBase revision: 52\nDiff stat: {\"added\": 1, \"removed\": 1}\nSummary: tasks added none; removed none; changed ['transform']; triggers unchanged; top-level sections changed ['tasks']\nProposal SHA-256: e3070d8576e280e51a0d075f461b5f34ae80f28d46b64230e9f7b1c7a9fb3654\nDiff (untrusted flow text, shown in full):\n--- orders_etl rev 52\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n\nWrites one flow revision and replays the failed task. On failure, rollback may restore the base source.'). Do NOT retry \u2014 the user has explicitly rejected it."
           }
         },
         {
           "name": "approval card shows the STORED diff, base revision, change summary and hash",
           "ok": true,
-          "detail": "Apply fix for INC-5ac79d8e to hko.demo.orders_etl?\nBase revision: 41\nDiff stat: {\"added\": 1, \"removed\": 1}\nSummary: tasks added none; removed none; changed ['transform']; triggers unchanged; top-level sections changed ['tasks']\nProposal SHA-256: 908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e\nDiff (untrusted flow text, shown in full):\n--- orders_etl rev 41\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in"
+          "detail": "Apply fix for INC-cc32b6b7 to hko.demo.orders_etl?\nBase revision: 52\nDiff stat: {\"added\": 1, \"removed\": 1}\nSummary: tasks added none; removed none; changed ['transform']; triggers unchanged; top-level sections changed ['tasks']\nProposal SHA-256: e3070d8576e280e51a0d075f461b5f34ae80f28d46b64230e9f7b1c7a9fb3654\nDiff (untrusted flow text, shown in full):\n--- orders_etl rev 52\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in"
         },
         {
           "name": "unattended webhook run cannot apply (no prompt, no write)",
@@ -268,14 +268,14 @@
         {
           "name": "typed command with the printed hash prefix (the human approval): apply returns verified",
           "ok": true,
-          "detail": "INC-5ac79d8e: verified\nFix applied as revision 42. Replay 1hF1moWsHLhcOUJrFHaSgt ended SUCCESS; 1 earlier task(s) were reused, not re-run.\n{\"incident_id\": \"INC-5ac79d8e\", \"status\": \"verified\", \"proposal_sha256\": \"908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e\", \"base_revision\": 41,"
+          "detail": "INC-cc32b6b7: verified\nFix applied as revision 53. Replay q1D4L5WD1MSJIVqqZC0P1 ended SUCCESS; 1 earlier task(s) were reused, not re-run.\n{\"incident_id\": \"INC-cc32b6b7\", \"status\": \"verified\", \"proposal_sha256\": \"e3070d8576e280e51a0d075f461b5f34ae80f28d46b64230e9f7b1c7a9fb3654\", \"base_revision\": 52, "
         },
         {
           "name": "exactly one new flow revision",
           "ok": true,
           "detail": {
-            "before": 41,
-            "after": 42
+            "before": 52,
+            "after": 53
           }
         },
         {
@@ -287,7 +287,7 @@
           "name": "exactly one replay execution of the original",
           "ok": true,
           "detail": [
-            "1hF1moWsHLhcOUJrFHaSgt"
+            "q1D4L5WD1MSJIVqqZC0P1"
           ]
         },
         {
@@ -307,8 +307,8 @@
           "name": "replay is a new execution of the fixed revision",
           "ok": true,
           "detail": {
-            "replay": "1hF1moWsHLhcOUJrFHaSgt",
-            "originalId": "18dqLcIUTw7RP5cCuvcHrl"
+            "replay": "q1D4L5WD1MSJIVqqZC0P1",
+            "originalId": "1cNKdc3eqrYnozYCW9NH25"
           }
         },
         {
@@ -323,15 +323,15 @@
             "original": [
               [
                 "SUCCESS",
-                "2026-11-09T07:22:08.121231Z",
-                "2026-11-09T07:22:08.123672Z"
+                "2026-11-09T07:55:19.863972Z",
+                "2026-11-09T07:55:19.865398Z"
               ]
             ],
             "replay": [
               [
                 "SUCCESS",
-                "2026-11-09T07:22:08.121231Z",
-                "2026-11-09T07:22:08.123672Z"
+                "2026-11-09T07:55:19.863972Z",
+                "2026-11-09T07:55:19.865398Z"
               ]
             ]
           }
@@ -347,12 +347,12 @@
           "detail": {
             "original": [
               {
-                "uri": "kestra:///hko/demo/orders-etl/executions/18dqLcIUTw7RP5cCuvcHrl/tasks/extract/5s3PmPwfxP7z0wm2d92Zce/14615852583145980134.csv"
+                "uri": "kestra:///hko/demo/orders-etl/executions/1cNKdc3eqrYnozYCW9NH25/tasks/extract/6shNgMm3ZHANh0j4okX3gu/4677184330365488362.csv"
               }
             ],
             "replay": [
               {
-                "uri": "kestra:///hko/demo/orders-etl/executions/18dqLcIUTw7RP5cCuvcHrl/tasks/extract/5s3PmPwfxP7z0wm2d92Zce/14615852583145980134.csv"
+                "uri": "kestra:///hko/demo/orders-etl/executions/1cNKdc3eqrYnozYCW9NH25/tasks/extract/6shNgMm3ZHANh0j4okX3gu/4677184330365488362.csv"
               }
             ]
           }
@@ -384,17 +384,17 @@
           "detail": [
             {
               "taskId": "extract",
-              "taskRunId": "1zr4mpset9Rs6VM07Jb1Rk",
+              "taskRunId": "1fUFtCSir5E531DfmfsQX8",
               "inline": true
             },
             {
               "taskId": "transform",
-              "taskRunId": "6tfMoo33lkzGzzdpoVpIGo",
+              "taskRunId": "6B7fpRxT6ETEH9IuvlryZ9",
               "inline": true
             },
             {
               "taskId": "load",
-              "taskRunId": "1m8c4EfLUJCZfiybqum2eB",
+              "taskRunId": "6Z3UhS4R2dzvGxpdLPPCDu",
               "inline": true
             }
           ]
@@ -402,7 +402,7 @@
         {
           "name": "replay ran the fixed revision",
           "ok": true,
-          "detail": 42
+          "detail": 53
         },
         {
           "name": "store journal records write then replay then verified",
@@ -436,15 +436,15 @@
         {
           "name": "second apply reports a no-op",
           "ok": true,
-          "detail": "INC-5ac79d8e: verified (no-op, already done)\nAlready verified. Nothing was written.\n{\"incident_id\": \"INC-5ac79d8e\", \"status\": \"verified\", \"proposal_sha256\": \"908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e\", \"base_revision\": 41, \"fixed_revision\": 42, \"rollback_revision\": null, \"orig"
+          "detail": "INC-cc32b6b7: verified (no-op, already done)\nAlready verified. Nothing was written.\n{\"incident_id\": \"INC-cc32b6b7\", \"status\": \"verified\", \"proposal_sha256\": \"e3070d8576e280e51a0d075f461b5f34ae80f28d46b64230e9f7b1c7a9fb3654\", \"base_revision\": 52, \"fixed_revision\": 53, \"rollback_revision\": null, \"orig"
         },
         {
           "name": "no new flow revision",
           "ok": true,
           "detail": {
             "before": {
-              "rev": 42,
-              "revisions": 27,
+              "rev": 53,
+              "revisions": 34,
               "execs": 2,
               "steps": [
                 "opened",
@@ -458,8 +458,8 @@
               ]
             },
             "after": {
-              "rev": 42,
-              "revisions": 27,
+              "rev": 53,
+              "revisions": 34,
               "execs": 2,
               "steps": [
                 "opened",
@@ -490,7 +490,7 @@
         {
           "name": "same via the model tool path: still a no-op",
           "ok": true,
-          "detail": "{'incident_id': 'INC-5ac79d8e', 'status': 'verified', 'proposal_sha256': '908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e', 'base_revision': 41, 'fixed_revision': 42, 'rollback_revisi"
+          "detail": "{'incident_id': 'INC-cc32b6b7', 'status': 'verified', 'proposal_sha256': 'e3070d8576e280e51a0d075f461b5f34ae80f28d46b64230e9f7b1c7a9fb3654', 'base_revision': 52, 'fixed_revision': 53, 'rollback_revisi"
         }
       ]
     }

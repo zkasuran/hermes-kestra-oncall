@@ -12,6 +12,7 @@ Playwright and Chrome are only needed to regenerate the pictures. The plugin doe
 
 ## The run behind the current pictures
 
-Taken on 2026-11-09 after `rig/reset.sh --yes && rig/up.sh`, with `python tests/e2e/run_e2e.py --only S1,S2,S3 --out /tmp/...` (a separate run from the one in `evidence/`, so the ids differ):
-incident `INC-8af8a0db`, failing execution `3B4DkIMzndVTxtmb6LVTRW`, base revision 46, fixed revision 47, replay `52WuudaIdSCTsT748URYBd`, webhook session `20261109_130332_bfee8ed3` (model `gpt-6-astra`).
-The typed command was `/kestra apply INC-8af8a0db 8a61e96c5ec2`, exactly the command the model printed.
+Taken on 2026-11-09 at commit `59c2bd7` (the webhook prompt that says the skill is preloaded). The rig was reset and brought up again (`rig/reset.sh --yes && rig/up.sh`), then `python tests/e2e/run_e2e.py --only S1,S2,S3 --out /tmp/...` ran (19/19, 25/25, 5/5).
+This is a separate run from the one in `evidence/`, so its ids differ from `evidence/E2E-SUMMARY.md`: incident `INC-001fe8a0`, failing execution `72yjX03D9aFfCOE4qHvADa`, base revision 57, fixed revision 58, replay `35PtlYYzChf06d8QMyRYb5`,
+webhook session `20261109_133702_a86b35fb` (model `gpt-6-astra`). The typed command was `/kestra apply INC-001fe8a0 0f56403eddab`, exactly the command the model printed. The reply does not mention a skill that could not be loaded.
+The dashboard picture was taken with `shot_dashboard.py`, which now scrolls the chosen incident card to a fixed position under the header.

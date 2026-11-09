@@ -1,13 +1,47 @@
 {
-  "generated": "2026-11-09T12:56:08+0530",
+  "generated": "2026-11-09T13:29:28+0530",
   "tested_commit": {
-    "commit": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
-    "tree": "55defd63037d14be382800ef6483fcf36252436e",
+    "commit": "59c2bd7fa3cdf81f86b5918731eec814cb43c04e",
+    "tree": "19ead97851daac14569e16ab37026b43763a872e",
     "e2e_ran_on_commit": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
     "runtime_files_changed_since_e2e": [],
+    "scenario_commits": {
+      "S1": "59c2bd7fa3cdf81f86b5918731eec814cb43c04e",
+      "S1b": "59c2bd7fa3cdf81f86b5918731eec814cb43c04e",
+      "S2": "59c2bd7fa3cdf81f86b5918731eec814cb43c04e",
+      "S3": "59c2bd7fa3cdf81f86b5918731eec814cb43c04e",
+      "S6a": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S4": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S5": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S7": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S8": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S9": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S10": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S11": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S12": "6d7e9f852c01499ef4113bd9d506b02c870b461d",
+      "S6b": "6d7e9f852c01499ef4113bd9d506b02c870b461d"
+    },
+    "declared_unaffected_changes": {
+      "files": [
+        "cli.py"
+      ],
+      "reason": "cli.py only holds the webhook route prompt text printed by 'hermes kestra-oncall setup' and installed by 'setup --apply'; only the model-driven webhook run (S1 to S3, re-run) reads it. S4 to S12 call the tools and /kestra commands in-process, never through that route.",
+      "applies_to_scenarios_not_rerun": [
+        "S6a",
+        "S4",
+        "S5",
+        "S7",
+        "S8",
+        "S9",
+        "S10",
+        "S11",
+        "S12",
+        "S6b"
+      ]
+    },
     "dirty_tracked_files": [],
     "branch": "main",
-    "commit_subject": "Rig pass 3 batch 2: manifest guard, pty and quickstart fixes; docs in progress"
+    "commit_subject": "Docs pass 3, screenshots, final evidence; webhook prompt no longer asks the model to load the preloaded skill"
   },
   "draft": false,
   "versions": {
@@ -22,7 +56,7 @@
     "tools.py": "5201a9e66227523545514a5cd08a0b5bdff582189c25f5920baee9f16ec411f7",
     "hooks.py": "4f4bb5bd9a6404249f9a437a110f2322d309a3f3eb0299d00ecf0caf401efc82",
     "commands.py": "6a79139cce0e0f293df8a000434df92231f78a45da1a42932634c6bc726cfdbf",
-    "cli.py": "062ba7216ffe5dce30ec133859a5111b71734fc683e83482deaa75c2ff5741e7",
+    "cli.py": "c2c059afea31fe0dcc5fc565777f5bac018b8b537577ce3071147bf2090b09e7",
     "client.py": "471c280481a185c610b0dcde43a0a66d174c58cd1d2306cc82e97b39015462fc",
     "store.py": "41e3c7df2efa0964e825edc5fb777b1345a11a0fe1fae177d2bbe171eb507074",
     "flowsrc.py": "387ede5c9683a35833ee49ddfc8a6580535a4562723c798ff898b47d3d3498a3",
@@ -52,41 +86,41 @@
     "rig/_env.sh": "4e5bf78d8a45469f8b4a8bb6932337ed4e17aa992b2f78c33a0c6b2d8a087b8a",
     "tests/e2e/run_e2e.py": "933039872b0f93e6b2125b280fdd54abc2ad0eeb42911c05f477638d3183eaf2",
     "tests/e2e/hermes_driver.py": "0d5c1a4e49ed3b64963c6f28cc91894f0e24b544c2238f7bf7cf20536d6e0d25",
-    "evidence/make_manifest.py": "6acf42fdbfe9a1c0cc06c579e18faa73184937ceac9a070ac321534f6a610079"
+    "evidence/make_manifest.py": "9bde038b399adb7e68c7c8df3c581c098d5753d319565ad1b847f116c89c0268"
   },
   "flows_in_kestra_at_manifest_time": {
     "hko.demo.orders_etl": {
-      "revision": 44,
+      "revision": 55,
       "source_sha256": "d536b51b946546eadfb2993ac02c393de103055dbadf2b4951ec5fa9bc31cd19",
       "disabled": false
     },
     "hko.demo.refund_approval": {
-      "revision": 34,
+      "revision": 42,
       "source_sha256": "fadcf519cbc8d8703b64e13e26f85ab543ae225e7a21407a198b4390ddec3f0e",
       "disabled": false
     },
     "hko.demo.healthy_report": {
-      "revision": 33,
+      "revision": 41,
       "source_sha256": "ada645288292097dc3065f42039dd85fa23f0080eb18b0ab71612828a4346f79",
       "disabled": false
     },
     "hko.demo.protected_ledger": {
-      "revision": 33,
+      "revision": 41,
       "source_sha256": "64ed6ed229b5f09841ff6ca57f87ec86125e1dfbc17d66f7bc034fbd3e67d310",
       "disabled": false
     },
     "hko.lookalike.orders_etl": {
-      "revision": 33,
+      "revision": 41,
       "source_sha256": "cd17fe413e1df5808c9bd9745d3c0f8279b92506829ad99a712c95006831d65f",
       "disabled": false
     },
     "hko.system.hermes_oncall_forwarder": {
-      "revision": 64,
+      "revision": 72,
       "source_sha256": "1a6b8d4d9cb5796d1a2d548f9218ee31aab467ed381c25bcb9a8ba5e4d214ba5",
       "disabled": false
     },
     "hko.system.secret_probe": {
-      "revision": 33,
+      "revision": 41,
       "source_sha256": "ad32ca6f34dd6943722161974983d607cc5d92e3c1936ff3a712ee59eb4e3a32",
       "disabled": false
     },
@@ -109,7 +143,7 @@
   },
   "results": {
     "all_passed": true,
-    "seconds": 345.8,
+    "seconds": 327.9,
     "per_scenario": {
       "S1": {
         "passed": true,
@@ -185,23 +219,23 @@
   },
   "execution_ids_by_scenario": {
     "S1": {
-      "failing": "7eZeCyhn4dSx05ZFsFc3IF",
-      "healthy": "5LQXwRGS8JCXSe0ghS3FT1",
-      "lookalike": "2P49foTcMCqSUFv83vXfbr",
-      "protected": "10gubCZXWs2flddk8iCsFL",
+      "failing": "1t3YKXg4A9SC7oEwQavSOL",
+      "healthy": "2BZIpX8TiYKYttvCr4pknb",
+      "lookalike": "10qHwGGfDfElNU1RHNtX8O",
+      "protected": "7MDtmNRaRgFTsWeuzmBqJm",
       "forwarder_executions": {
-        "10gubCZXWs2flddk8iCsFL": "4WtVMoeTcsCh1Yb3p9ZFbp",
-        "7eZeCyhn4dSx05ZFsFc3IF": "4WneH1z85C5xmnp9E0sNeB"
+        "7MDtmNRaRgFTsWeuzmBqJm": "QoRZU3tGgJf9aKMCfzbqH",
+        "1t3YKXg4A9SC7oEwQavSOL": "6vMUMbVu3enTSe3Kpt1ixH"
       },
-      "incident": "INC-fc91a049",
-      "protected_incident": "INC-51ca7891"
+      "incident": "INC-266c898e",
+      "protected_incident": "INC-06519b54"
     },
     "S1b": {
-      "selffail_execution": "44d3ClPWkmoa6rpQKnLjdc"
+      "selffail_execution": "5lKDnrIeKipI3HWx63Asq2"
     },
     "S2": {
-      "original_execution": "7eZeCyhn4dSx05ZFsFc3IF",
-      "replay_execution": "3UfvbR34JO0ayEkwdLQ7oC"
+      "original_execution": "1t3YKXg4A9SC7oEwQavSOL",
+      "replay_execution": "1VgpjY37nojTzwImf4iNjq"
     },
     "S3": {},
     "S6a": {
@@ -288,7 +322,9 @@
     "evidence/e2e-run-commit.txt",
     "evidence/logs/gateway_model_tools.txt",
     "evidence/logs/s1_gateway.txt",
+    "evidence/logs/s1_model_reply.txt",
     "evidence/logs/v023_s1_gateway.txt",
+    "evidence/release-validate.txt",
     "evidence/v023-run-commit.txt"
   ],
   "result_files": [

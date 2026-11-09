@@ -8,7 +8,11 @@ with sync_playwright() as p:
     try: pg.get_by_text('No thanks', exact=True).click(); pg.wait_for_timeout(500)
     except Exception: pass
     if focus:
-        pg.evaluate("""(id)=>{const c=[...document.querySelectorAll('.ko-card')].find(e=>e.innerText.includes(id)); c.scrollIntoView({block:'start'}); document.scrollingElement.scrollBy(0,0); let n=c.parentElement; while(n){ if(n.scrollHeight>n.clientHeight+5 && getComputedStyle(n).overflowY!='visible'){ n.scrollTop+=96; break;} n=n.parentElement } }""", focus)
+        # Put the card 64 CSS px below the top of the page, just under the Hermes header, whatever its position in the list.
+        pg.evaluate("""(id)=>{const c=[...document.querySelectorAll('.ko-card')].find(e=>e.innerText.includes(id));
+          c.scrollIntoView({block:'start'});
+          let n=c.parentElement;
+          while(n){ if(n.scrollHeight>n.clientHeight+5 && getComputedStyle(n).overflowY!='visible'){ n.scrollTop+=c.getBoundingClientRect().top-64; break;} n=n.parentElement } }""", focus)
         pg.wait_for_timeout(500)
     pg.screenshot(path=out)
     b.close()

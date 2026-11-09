@@ -49,7 +49,7 @@ known_issues:
   - "Model-driven writes are refused while Hermes approvals are bypassed (--yolo, /yolo, approvals.mode: off). The check imports tools.approval.is_approval_bypass_active, which hermes plugins validate reports as one non-public import."
   - "Built for plugins.isolation: in_process (Hermes's default). Host isolation skips CLI registration and was not tested."
   - "Tested on Kestra 2.0.9 only. A failed Loop cannot be replayed on that version and a failed Subflow is diagnosis-only."
-  - "The end-to-end run used Hermes main at c3354ea. On v0.23.0 validate, doctor and the live plugin test passed."
+  - "The end-to-end run used Hermes main at c3354ea. On v0.23.0 scenarios S1, S1b, S2 and S3 passed, as did validate, doctor and the live plugin test."
 capabilities:
   provides_tools:
     - kestra_status

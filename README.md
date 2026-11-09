@@ -225,18 +225,18 @@ The dashboard tab was run in a real `hermes dashboard` against the plugin's core
 ## Tested with
 
 - Kestra 2.0.9 (`kestra/kestra:v2.0.9`), open-source edition, basic authentication.
-- Hermes Agent main at `c3354ea` for the full run. Hermes v0.23.0 ran scenarios S1, S1b, S2 and S3 (all passed), plus `hermes plugins validate`, `hermes plugins doctor` and a live plugin test.
-- Plugin commit `6d7e9f852c01`. The runtime files have not changed since the run (the evidence manifest on the `dev` branch records their hashes).
+- Hermes Agent main at `c3354ea` for the full run. Hermes v0.23.0 ran scenarios S1, S1b, S2 and S3 on `59c2bd7` (all passed), plus `hermes plugins validate`, `hermes plugins doctor` and a live plugin test.
+- Plugin commits: S1, S1b, S2 and S3 ran on `59c2bd7`. The other scenarios ran on `6d7e9f8`. The only runtime file that differs between them is `cli.py`, which holds just the webhook route prompt that `setup` installs. Only the model-driven webhook run reads it, so S4 to S12 were not repeated. The evidence manifest on the `dev` branch records the hashes and the commit of each scenario.
 - A real model (`gpt-6-astra`, with `gpt-6.1-sol` and `gpt-5.6-sol` as fallbacks when the shared pool rate-limits) wrote the proposals in S1 to S3. The other scenarios use scripted proposals so the model cannot race them.
 - `hermes plugins validate --install-deps` passes on the tree that is pinned for the catalog, with one warning: the private import `tools.approval.is_approval_bypass_active` in `settings.py`. The plugin uses it to refuse model-driven writes while Hermes approvals are bypassed. It fails closed if the check raises.
 
-End-to-end scenarios, 189 of 189 assertions passed in 345.8 s. Every assertion reads state back from Kestra's API or the plugin store (revisions, replay `originalId`, attempts, outputs), not from the plugin's own answer.
+End-to-end scenarios, 189 of 189 assertions passed. Every assertion reads state back from Kestra's API or the plugin store (revisions, replay `originalId`, attempts, outputs), not from the plugin's own answer.
 
 | Scenario | What it proves | Assertions |
 |---|---|---|
 | S1 | A failure reaches Hermes through the forwarder and webhook. A real model opens an incident and stores a proposal. The healthy flow, the lookalike namespace and the protected flow create no proposal. | 19/19 |
 | S1b | A wrong token is rejected, a duplicate delivery is ignored, a failure in the forwarder's own namespace never loops. | 6/6 |
-| S2 | Deny writes nothing. Webhook and cron runs cannot apply. A hash that is not the stored proposal is blocked before any prompt. The typed command `/kestra apply <id> <hash>` then makes exactly one revision (38 to 39 in the recorded run) and one replay from `transform`, with `extract` reused (identical attempt timestamps and outputs) and `load` run. The original stays `FAILED`. | 25/25 |
+| S2 | Deny writes nothing. Webhook and cron runs cannot apply. A hash that is not the stored proposal is blocked before any prompt. The typed command `/kestra apply <id> <hash>` then makes exactly one revision (49 to 50 in the recorded run) and one replay from `transform`, with `extract` reused (identical attempt timestamps and outputs) and `load` run. The original stays `FAILED`. | 25/25 |
 | S3 | Applying the same proposal again changes no revision, no execution and no journal row. | 5/5 |
 | S4 | A flow edited after the proposal makes `apply` answer `stale` and write nothing. A new proposal on the new revision verifies and keeps the edit. | 11/11 |
 | S5 | A proposal that validates but still fails ends `rolled_back`: the flow source is byte-identical to the base again. | 12/12 |
