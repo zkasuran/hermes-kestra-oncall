@@ -1,0 +1,90 @@
+{
+  "flows": [
+    {
+      "file": "kestra/demo/healthy_report.yaml",
+      "namespace": "hko.demo",
+      "flow_id": "healthy_report",
+      "revision": 7,
+      "validated": true
+    },
+    {
+      "file": "kestra/demo/lookalike_orders.yaml",
+      "namespace": "hko.lookalike",
+      "flow_id": "orders_etl",
+      "revision": 7,
+      "validated": true
+    },
+    {
+      "file": "kestra/demo/orders_etl.yaml",
+      "namespace": "hko.demo",
+      "flow_id": "orders_etl",
+      "revision": 8,
+      "validated": true
+    },
+    {
+      "file": "kestra/demo/protected_ledger.yaml",
+      "namespace": "hko.demo",
+      "flow_id": "protected_ledger",
+      "revision": 7,
+      "validated": true
+    },
+    {
+      "file": "kestra/demo/refund_approval.yaml",
+      "namespace": "hko.demo",
+      "flow_id": "refund_approval",
+      "revision": 8,
+      "validated": true
+    },
+    {
+      "file": "kestra/flows/hermes_oncall_forwarder.yaml",
+      "namespace": "hko.system",
+      "flow_id": "hermes_oncall_forwarder",
+      "revision": 9,
+      "validated": true
+    },
+    {
+      "file": "kestra/flows/secret_probe.yaml",
+      "namespace": "hko.system",
+      "flow_id": "secret_probe",
+      "revision": 7,
+      "validated": true
+    }
+  ],
+  "secret_probe": {
+    "id": "NefdOiamm3ridjQFK1vlg",
+    "state": "SUCCESS",
+    "outputs": {
+      "resolve_secrets": [
+        {
+          "value": "true"
+        }
+      ]
+    }
+  },
+  "configs": {
+    "uuid": "2LkUwVyWg7PYEJC04nySWA",
+    "version": "2.0.9",
+    "edition": "OSS",
+    "commitId": "b961b22",
+    "chartDefaultDuration": "PT24H",
+    "flowTemplate": "",
+    "commitDate": "2026-11-03T14:42:15Z",
+    "isCustomDashboardsEnabled": false,
+    "isAnonymousUsageEnabled": true,
+    "isUiAnonymousUsageEnabled": true,
+    "preview": {
+      "initial": 100,
+      "max": 5000
+    },
+    "systemNamespace": "system",
+    "hiddenLabelsPrefixes": [
+      "system.",
+      "internal."
+    ],
+    "isAiEnabled": true,
+    "isAiApiKeyConfigured": false,
+    "isBasicAuthInitialized": true,
+    "pluginsHash": 3071954481,
+    "isPluginAutoInstallEnabled": true
+  }
+}

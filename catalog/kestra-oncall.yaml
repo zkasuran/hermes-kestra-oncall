@@ -1,0 +1,56 @@
+# Draft catalog entry for NousResearch/hermes-agent plugin-catalog/kestra-oncall.yaml.
+# The orchestrator replaces `sha` (and every sha inside the image URLs) with the real pinned commit
+# before opening the PR. Keep `version` and `capabilities` equal to plugin.yaml at that commit.
+name: kestra-oncall
+title: Kestra On-Call
+repo: https://github.com/zkasuran/hermes-kestra-oncall
+sha: "0000000000000000000000000000000000000000"
+description: >-
+  Puts Hermes on call for Kestra. When an execution in an allowed namespace fails, Hermes reads the failed
+  task, its error logs and what changed since the last good run, proposes the smallest fix to the flow and
+  asks you in chat. After one approval it saves the fix as a new flow revision, replays the failed execution
+  from the task that failed (tasks that already succeeded are not rerun), follows the replay and checks the
+  result. A failed replay restores the previous revision if the flow is still at the fixed one. Kestra Pause
+  tasks become chat questions you can answer from any Hermes surface, and a Kestra on-call dashboard tab
+  lists open incidents, proposals and pauses (read-only). Disclosure: network: only the Kestra URL you
+  configure (kestra_url, HTTPS required unless loopback), using the Kestra credentials you give Hermes
+  (KESTRA_USERNAME and KESTRA_PASSWORD, or KESTRA_API_TOKEN, read through Hermes secret scope); no other
+  host, no telemetry. Writes to Kestra are limited to a flow update, a replay, a rollback to the previous
+  revision, and resume or kill of a paused execution; the two write tools (kestra_apply_fix and
+  kestra_pause_decide) go through Hermes's approval prompt with the stored diff or the frozen inputs, bound to the
+  exact proposal hash, and are refused in webhook, cron and single-query runs. It fails closed: an empty
+  namespaces setting allows nothing, and protected_flows are diagnosis-only. Stores incidents, flow
+  sources, error logs, diffs, proposals and decision records in the plugin's profile-scoped SQLite database.
+  The webhook route it can install (hermes kestra-oncall setup --apply) only adds one named route to
+  config.yaml and never deploys a Kestra flow. The dashboard routes under /api/plugins/kestra-oncall only
+  read. AI-assisted implementation.
+maintainer: zkasuran
+tier: community
+category: automation
+requires_hermes: ">=0.23.0"
+docs_url: https://github.com/zkasuran/hermes-kestra-oncall#readme
+version: "0.1.0"
+# TODO(orchestrator): upload the captured images to assets/, then re-pin these URLs to the final sha.
+image: https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/0000000000000000000000000000000000000000/assets/banner.png
+screenshots:
+  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/0000000000000000000000000000000000000000/assets/01-chat-diagnosis.png
+  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/0000000000000000000000000000000000000000/assets/02-kestra-replay.png
+  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/0000000000000000000000000000000000000000/assets/03-dashboard.png
+readme: true
+platforms: []
+known_issues:
+  - "Kestra has no compare-and-set on flow updates, so the check-then-write window is narrowed by a fresh re-read, not removed."
+  - "Built for in-process plugins (Hermes's default). Tested against Kestra 2.0.9."
+capabilities:
+  provides_tools:
+    - kestra_status
+    - kestra_incident_open
+    - kestra_incidents
+    - kestra_propose_fix
+    - kestra_apply_fix
+    - kestra_pauses
+    - kestra_pause_decide
+  provides_hooks:
+    - pre_tool_call
+  provides_middleware: []
+  requires_env: []

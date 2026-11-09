@@ -1,0 +1,2 @@
+2026-11-09 09:35:49,549 INFO gateway.platforms.webhook_coalesce: [webhook] coalesce settled group=kestra-oncall|4qksS9u5ehdf59nGyMvxtm events=1 delivery=4qksS9u5ehdf59nGyMvxtm
+2026-11-09 09:35:52,494 INFO gateway.platforms.webhook_coalesce: [webhook] coalesce settled group=kestra-oncall|6V7j9pWTAEdO9PK5ykc0sU events=1 delivery=6V7j9pWTAEdO9PK5ykc0sU

@@ -1,6 +1,9 @@
 id: hermes_oncall_forwarder
 namespace: hko.system
-description: Forward allowed failed executions to the authenticated Hermes route.
+description: |
+  Forward a failed execution in an allowed namespace (hko.demo, hko.e2e and their children) to the
+  Hermes webhook route kestra-oncall. Lives in hko.system, which is not allowed, so a failure of this
+  flow can never trigger itself. Hermes drops a repeated X-Request-ID, so the retry is safe.
 disabled: true
 tasks:
   - id: notify_hermes
@@ -12,8 +15,13 @@ tasks:
       X-Gitlab-Token: "{{ secret('HERMES_WEBHOOK_TOKEN') }}"
       X-Request-ID: "{{ trigger.executionId }}"
     options:
-      readTimeout: PT10S
-      connectTimeout: PT5S
+      timeout:
+        connectTimeout: PT5S
+        readIdleTimeout: PT30S
+    retry:
+      type: constant
+      interval: PT5S
+      maxAttempts: 3
     body: |
       {
         "event_type": "kestra.execution.failed",

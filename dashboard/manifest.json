@@ -1,0 +1,14 @@
+{
+  "name": "kestra-oncall",
+  "label": "Kestra on-call",
+  "description": "Open Kestra incidents, stored fix proposals and pending Pause questions (read-only).",
+  "icon": "Activity",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/kestra-oncall",
+    "position": "after:sessions"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}

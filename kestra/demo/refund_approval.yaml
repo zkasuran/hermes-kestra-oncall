@@ -18,7 +18,3 @@ tasks:
   - id: record_decision
     type: io.kestra.plugin.core.debug.Return
     format: "{{ outputs.approval.onResume | toJson }}"
-outputs:
-  - id: decision
-    type: JSON
-    value: "{{ outputs.record_decision.value }}"

@@ -137,6 +137,15 @@ class API:
             time.sleep(1)
         raise TimeoutError(f'Execution {execution_id} did not reach {states} in {timeout}s')
 
+    def task_outputs(self, execution_id: str) -> dict:
+        """Kestra 2.0 keeps task outputs out of the execution: {taskId: [outputs per task run]}."""
+        listing = self.request('GET', self.prefix + '/outputs/tasks/' + execution_id) or []
+        found: dict[str, list] = {}
+        for row in listing:
+            detail = self.request('GET', self.prefix + f"/outputs/tasks/{execution_id}/{row['taskRunId']}")
+            found.setdefault(row['taskId'], []).append(detail)
+        return found
+
     def executions(self, namespace: str, flow_id: str) -> list[dict]:
         query = urllib.parse.urlencode({'namespace': namespace, 'flowId': flow_id, 'size': 1000,
                                        'sort': 'state.startDate:desc'})

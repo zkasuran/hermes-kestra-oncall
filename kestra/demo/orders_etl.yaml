@@ -36,7 +36,3 @@ tasks:
     type: io.kestra.plugin.core.storage.Write
     extension: .json
     content: "{{ read(outputs.transform.outputFiles['summary.json']) }}"
-outputs:
-  - id: summary
-    type: JSON
-    value: "{{ read(outputs.load.uri) }}"

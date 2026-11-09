@@ -1,0 +1,421 @@
+{
+  "kestra_version": "2.0.9",
+  "started": "2026-11-09T09:33:40+0530",
+  "seconds": 44.9,
+  "forwarder": {
+    "revision_before": 5,
+    "revision_after": 7,
+    "disabled_during_S4_S5_S6_to_keep_the_model_out_of_scripted_proposals": true
+  },
+  "all_passed": false,
+  "scenarios": [
+    {
+      "id": "S1",
+      "title": "crashed",
+      "passed": false,
+      "seconds": 0.0,
+      "ids": {},
+      "notes": [],
+      "assertions": [
+        {
+          "name": "scenario ran to completion",
+          "ok": false,
+          "detail": "sqlite3.OperationalError: unable to open database file | y\", line 266, in <lambda>\n    row = poll(lambda: (incident_row(failing['id']) if (incident_row(failing['id']) and proposal_count(incident_row(failing['id'])['incident_id'])) else None), 420, 5)\n                                                        ~~~~~~~~~~~~^^^^^^^^^^^^^^^\n  File \"/home/asuran/hermes-kestra-oncall/tests/e2e/run_e2e.py\", line 108, in incident_row\n    with db() as conn:\n         ~~^^\n  File \"/home/asuran/hermes-kestra-oncall/tests/e2e/run_e2e.py\", line 97, in db\n    conn = sqlite3.connect(f'file:{DB}?mode=ro', uri=True)\nsqlite3.OperationalError: unable to open database file\n"
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "approve and repair: deny, unattended refusal, then approved apply -> one revision, one replay from transform, extract reused, load ran",
+      "passed": false,
+      "seconds": 0.0,
+      "ids": {},
+      "notes": [],
+      "assertions": [
+        {
+          "name": "S1 produced a proposal to apply",
+          "ok": false,
+          "detail": "run S1 first"
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "idempotent retry: apply the same proposal again -> no revision, no replay, no journal growth",
+      "passed": false,
+      "seconds": 0.0,
+      "ids": {},
+      "notes": [],
+      "assertions": [
+        {
+          "name": "S2 completed",
+          "ok": false,
+          "detail": "run S2 first"
+        }
+      ]
+    },
+    {
+      "id": "S6a",
+      "title": "crashed",
+      "passed": false,
+      "seconds": 0.0,
+      "ids": {},
+      "notes": [],
+      "assertions": [
+        {
+          "name": "scenario ran to completion",
+          "ok": false,
+          "detail": "RuntimeError: driver produced no JSON (exit 1): Traceback (most recent call last):\n  File \"/home/asuran/hermes-kestra-oncall/tests/e2e/hermes_driver.py\", line 102, in <module>\n    raise SystemExit(main())\n                     ~~~~^^\n  File \"/home/asuran/hermes-kestra-oncall/tests/e2e/hermes_driver.py\", line 76, in main\n    from kestra_oncall.client import KestraClient\nModuleNotFoundError: No module named 'kestra_oncall' |  \"/home/asuran/hermes-kestra-oncall/tests/e2e/run_e2e.py\", line 80, in drive\n    raise RuntimeError(f'driver produced no JSON (exit {proc.returncode}): {proc.stderr[-800:]}')\nRuntimeError: driver produced no JSON (exit 1): Traceback (most recent call last):\n  File \"/home/asuran/hermes-kestra-oncall/tests/e2e/hermes_driver.py\", line 102, in <module>\n    raise SystemExit(main())\n                     ~~~~^^\n  File \"/home/asuran/hermes-kestra-oncall/tests/e2e/hermes_driver.py\", line 76, in main\n    from kestra_oncall.client import KestraClient\nModuleNotFoundError: No module named 'kestra_oncall'\n\n"
+        }
+      ]
+    },
+    {
+      "id": "S4",
+      "title": "stale proposal: flow edited out of band after propose -> apply refused, no write",
+      "passed": true,
+      "seconds": 7.1,
+      "ids": {
+        "flow": "hko.e2e.e2e_orders_stale",
+        "original_execution": "5K5EViJwBBT5aO5QTvCcAs",
+        "incident": "INC-4e5c73a1",
+        "proposal_sha256": "d30ee2b92eb4aceab609a4006196b6440f6996aeaba5270ba01bdd77ea3aadc1"
+      },
+      "notes": [],
+      "assertions": [
+        {
+          "name": "scenario flow failed as designed",
+          "ok": true,
+          "detail": "FAILED"
+        },
+        {
+          "name": "incident opened",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "proposal stored with hash",
+          "ok": true,
+          "detail": {
+            "incident_id": "INC-4e5c73a1",
+            "proposal_sha256": "d30ee2b92eb4aceab609a4006196b6440f6996aeaba5270ba01bdd77ea3aadc1",
+            "base_revision": 1,
+            "base_source_sha256": "c69bbdc33bbce004e6b4d25a66a29d75b434d70f5d72b236a5af257865924761",
+            "diff": "--- e2e_orders_stale rev 1\n+++ e2e_orders_stale proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n",
+            "diff_stat": {
+              "added": 1,
+              "removed": 1
+            },
+            "validation": [],
+            "rationale": "e2e S4: rename column mapping",
+            "next": "Ask the human to review the diff, then call kestra_apply_fix with proposal_sha256=d30ee2b92eb4aceab609a4006196b6440f6996aeaba5270ba01bdd77ea3aadc1."
+          }
+        },
+        {
+          "name": "out-of-band edit created a new revision",
+          "ok": true,
+          "detail": 2
+        },
+        {
+          "name": "apply refused as stale",
+          "ok": true,
+          "detail": "INC-4e5c73a1: stale\n{\"incident_id\": \"INC-4e5c73a1\", \"status\": \"stale\", \"proposal_sha256\": \"d30ee2b92eb4aceab609a4006196b6440f6996aeaba5270ba01bdd77ea3aadc1\", \"base_revision\": 1, \"fixed_revision\": null, \"rollback_revision\": null, \"original_execution_id\": \"5K5EViJwBBT5aO5QTvCcAs\", \"replay_execution_id\": null, \"adopted_existing_write\": false, \"adopted_existing_replay\": false, \"actor\": \"hermes:cli:e2e"
+        },
+        {
+          "name": "no write: revision and source are still the out-of-band edit",
+          "ok": true,
+          "detail": 2
+        },
+        {
+          "name": "no revision added and no replay started",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "incident status stale",
+          "ok": true,
+          "detail": "stale"
+        },
+        {
+          "name": "proposal stored with hash",
+          "ok": true,
+          "detail": {
+            "incident_id": "INC-4e5c73a1",
+            "proposal_sha256": "954153e5d9b54b84061e87ab7cabaa7d8db1f4c573122ba80ea73f90a8040d8f",
+            "base_revision": 2,
+            "base_source_sha256": "7d1dfcd70384bf64ca495bf812260502b62d92061ed48665df5a80f52fcc14f9",
+            "diff": "--- e2e_orders_stale rev 2\n+++ e2e_orders_stale proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n",
+            "diff_stat": {
+              "added": 1,
+              "removed": 1
+            },
+            "validation": [],
+            "rationale": "e2e S4: re-propose on the current revision",
+            "next": "Ask the human to review the diff, then call kestra_apply_fix with proposal_sha256=954153e5d9b54b84061e87ab7cabaa7d8db1f4c573122ba80ea73f90a8040d8f."
+          }
+        },
+        {
+          "name": "after a fresh proposal on the current revision the apply verifies",
+          "ok": true,
+          "detail": "INC-4e5c73a1: verified\n{\"incident_id\": \"INC-4e5c73a1\", \"status\": \"verified\", \"proposal_sha256\": \"954153e5d9b54b84061e87ab7cabaa7d8db1f4c573122ba80ea73f90a8040d8f\", \"base_revision\": 2, \"fixed_revision\": 3, \"rollback_revision\": null, \"original_execution_id\": \"5K5EViJwBBT5aO5QTvCcAs\", \"replay_execution"
+        },
+        {
+          "name": "that fix landed on top of the out-of-band edit (edit preserved)",
+          "ok": true,
+          "detail": null
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "title": "rollback: a proposal that validates but still fails -> replay FAILED -> flow back to the base source",
+      "passed": false,
+      "seconds": 6.2,
+      "ids": {
+        "flow": "hko.e2e.e2e_orders_rollback",
+        "original_execution": "bSrzv7R3AX7jcqLveSjSL",
+        "incident": "INC-f792e767",
+        "replay_execution": "bSrzv7R3AX7jcqLveSjSL"
+      },
+      "notes": [],
+      "assertions": [
+        {
+          "name": "incident opened",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "proposal stored with hash",
+          "ok": true,
+          "detail": {
+            "incident_id": "INC-f792e767",
+            "proposal_sha256": "09cd2cd0dacb0d156c7b12a8a3f92535f23bd9ba2589169ca152d2c467de5778",
+            "base_revision": 1,
+            "base_source_sha256": "cca1d5bd8c266edeba538c897e784c0a14fb9d74e634ee19d97cfdaf750f5940",
+            "diff": "--- e2e_orders_rollback rev 1\n+++ e2e_orders_rollback proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"net_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n",
+            "diff_stat": {
+              "added": 1,
+              "removed": 1
+            },
+            "validation": [],
+            "rationale": "e2e S5: deliberately wrong column to exercise rollback",
+            "next": "Ask the human to review the diff, then call kestra_apply_fix with proposal_sha256=09cd2cd0dacb0d156c7b12a8a3f92535f23bd9ba2589169ca152d2c467de5778."
+          }
+        },
+        {
+          "name": "Kestra validation accepts the wrong fix",
+          "ok": true,
+          "detail": []
+        },
+        {
+          "name": "result is rolled_back",
+          "ok": true,
+          "detail": "\"INC-f792e767: rolled_back\\n{\\\"incident_id\\\": \\\"INC-f792e767\\\", \\\"status\\\": \\\"rolled_back\\\", \\\"proposal_sha256\\\": \\\"09cd2cd0dacb0d156c7b12a8a3f92535f23bd9ba2589169ca152d2c467de5778\\\", \\\"base_revision\\\": 1, \\\"fixed_revision\\\": 2, \\\"rollback_revision\\\": 3, \\\"original_execution_id\\\": \\\"bSrzv7R3AX7jcqLveSjSL\\\", \\\"replay_execution_id\\\": \\\"5n8uKKLuduQFS8bv0mR37i\\\", \\\"adopted_existing_write\\\": false, \\\"a"
+        },
+        {
+          "name": "flow source is byte-identical to the base source again",
+          "ok": true,
+          "detail": {
+            "base_sha": "cca1d5bd8c266edeba538c897e784c0a14fb9d74e634ee19d97cfdaf750f5940",
+            "now_sha": "cca1d5bd8c266edeba538c897e784c0a14fb9d74e634ee19d97cfdaf750f5940"
+          }
+        },
+        {
+          "name": "revision history: fix then rollback (exactly two new revisions)",
+          "ok": true,
+          "detail": {
+            "base": 1,
+            "now": 3
+          }
+        },
+        {
+          "name": "the middle revision holds the wrong fix (history preserved)",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "exactly one replay and it FAILED",
+          "ok": false,
+          "detail": [
+            [
+              "bSrzv7R3AX7jcqLveSjSL",
+              "FAILED"
+            ],
+            [
+              "5n8uKKLuduQFS8bv0mR37i",
+              "FAILED"
+            ]
+          ]
+        },
+        {
+          "name": "original execution unchanged (FAILED)",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "incident status rolled_back",
+          "ok": true,
+          "detail": "rolled_back"
+        },
+        {
+          "name": "re-running the same apply after rollback is a no-op",
+          "ok": true,
+          "detail": null
+        }
+      ]
+    },
+    {
+      "id": "S7",
+      "title": "pause: PAUSED refund_approval appears in /kestra pauses, resumes with inputs, downstream sees them; stale guard when resumed out of band first",
+      "passed": true,
+      "seconds": 13.0,
+      "ids": {
+        "execution": "5La4Ap0KatdARK90rALTsE",
+        "flow": "hko.demo.refund_approval",
+        "stale_execution": "2hVga24QYnVamjNZVbERwk",
+        "killed_execution": "mtXZbH3m6RgFPP7sizMYd"
+      },
+      "notes": [],
+      "assertions": [
+        {
+          "name": "execution reached PAUSED at the approval task",
+          "ok": true,
+          "detail": "PAUSED"
+        },
+        {
+          "name": "/kestra pauses lists the execution and the question",
+          "ok": true,
+          "detail": "5La4Ap0KatdARK90rALTsE  hko.demo.refund_approval\nApprove refund A100 and give an audit reason."
+        },
+        {
+          "name": "pause row carries task run id, declared inputs and flow identity",
+          "ok": true,
+          "detail": [
+            {
+              "execution_id": "5La4Ap0KatdARK90rALTsE",
+              "namespace": "hko.demo",
+              "flow_id": "refund_approval",
+              "flow": "hko.demo.refund_approval",
+              "revision": 6,
+              "paused_task_run_id": "3N1t7dUJSEhdIOuXPlRDeH",
+              "paused_task_id": "approval",
+              "description": "Approve refund A100 and give an audit reason.",
+              "declared_inputs": [
+                {
+                  "id": "approved",
+                  "type": "BOOL",
+                  "required": true,
+                  "defaults": null,
+                  "description": ""
+                },
+                {
+                  "id": "reason",
+                  "type": "STRING",
+                  "required": true,
+                  "defaults": null,
+                  "description": ""
+                }
+              ],
+              "paused_for_seconds": 2,
+              "execution_inputs": {},
+              "labels": {},
+              "protected": false
+            }
+          ]
+        },
+        {
+          "name": "human DENY: still PAUSED",
+          "ok": true,
+          "detail": "Not approved. No Kestra write was dispatched.\nReview the stored incident or pause and try again when ready."
+        },
+        {
+          "name": "unattended webhook run cannot resume (no prompt)",
+          "ok": true,
+          "detail": "Unattended writes are blocked. Review this incident in an interactive chat. Check settings or refresh the incident/pause and review a fresh proposal."
+        },
+        {
+          "name": "unattended cron run cannot resume (no prompt)",
+          "ok": true,
+          "detail": "Unattended writes are blocked. Review this incident in an interactive chat. Check settings or refresh the incident/pause and review a fresh proposal."
+        },
+        {
+          "name": "invalid input value refused by Kestra validation, execution still PAUSED",
+          "ok": true,
+          "detail": "Kestra rejected the resume inputs: approved: Invalid value for input `approved`. Cause: Unable to parse `maybe` as a boolean\nCheck settings or refresh the incident/pause and review a fresh proposal."
+        },
+        {
+          "name": "approval prompt shows the question and the inputs",
+          "ok": true,
+          "detail": [
+            {
+              "label": "<kestra_pause_decide> (plugin approval rule)",
+              "description": "Resume hko.demo.refund_approval?\nExecution: 5La4Ap0KatdARK90rALTsE\nPaused task run: 3N1t7dUJSEhdIOuXPlRDeH\nPaused task: approval\nQuestion (untrusted flow text): Approve refund A100 and give an audit reason.\nInputs: {\"approved\": \"true\", \"reason\": \"Customer confirmed damaged item\"}\nDecision SHA-256: e2fbb70d6f2410f5d371d25d92f0950f4f0270803e2e846de2e295e584e765f0\nLive pause state is checked again immediately before the write."
+            }
+          ]
+        },
+        {
+          "name": "execution left PAUSED and finished SUCCESS",
+          "ok": true,
+          "detail": "SUCCESS"
+        },
+        {
+          "name": "downstream task saw approved=true and the reason",
+          "ok": true,
+          "detail": [
+            {
+              "value": "{\"reason\":\"Customer confirmed damaged item\",\"approved\":true}"
+            }
+          ]
+        },
+        {
+          "name": "the paused task run ended SUCCESS (one run, not re-created)",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "repeating the resume writes nothing (execution is no longer paused)",
+          "ok": true,
+          "detail": "No unique current pause for that execution. Run /kestra pauses and use its execution id."
+        },
+        {
+          "name": "out-of-band resume happened first",
+          "ok": true,
+          "detail": "SUCCESS"
+        },
+        {
+          "name": "late decision from the old snapshot is refused: no longer paused",
+          "ok": true,
+          "detail": "{'error': 'Execution 2hVga24QYnVamjNZVbERwk is no longer paused on task run 6QCa9HgbOZTMdYnn4u23K5 (now SUCCESS, task run state SUCCESS). Nothing was written. Refresh the pauses list and ask again.', 'hint': 'Check settings or refresh the incident/pause and review a fresh proposal.'}"
+        },
+        {
+          "name": "no second write: same task runs, the out-of-band inputs stand",
+          "ok": true,
+          "detail": [
+            {
+              "value": "{\"reason\":\"resumed out of band\",\"approved\":true}"
+            }
+          ]
+        },
+        {
+          "name": "kill (approved) ends the paused execution KILLED",
+          "ok": true,
+          "detail": "KILLED"
+        }
+      ]
+    },
+    {
+      "id": "S6b",
+      "title": "interrupted apply, phase 2: next apply adopts the written fix and does exactly one replay",
+      "passed": false,
+      "seconds": 0.0,
+      "ids": {},
+      "notes": [],
+      "assertions": [
+        {
+          "name": "phase 1 completed",
+          "ok": false,
+          "detail": "run S6a first"
+        }
+      ]
+    }
+  ]
+}
