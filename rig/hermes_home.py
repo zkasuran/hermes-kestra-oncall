@@ -15,7 +15,7 @@ import sys
 
 from ruamel.yaml import YAML
 
-from common import HOME, HERMES, PYTHON, ROOT, RUN, env_file
+from common import HOME, HERMES, PYTHON, REPLAY_TIMEOUT_S, ROOT, RUN, env_file
 
 OPENCODE = Path.home() / '.config/opencode/opencode.json'
 HOST = os.environ.get('HKO_WEBHOOK_HOST', '10.250.90.1')  # the docker network gateway: reachable from hko-kestra
@@ -79,7 +79,7 @@ def write_config() -> None:
     entries['kestra-oncall'] = {'settings': {
         'kestra_url': 'http://127.0.0.1:28090', 'tenant': 'main',
         'namespaces': NAMESPACES, 'protected_flows': PROTECTED,
-        'rollback_on_failure': True, 'replay_timeout_seconds': 30, 'max_log_lines': 100}}
+        'rollback_on_failure': True, 'replay_timeout_seconds': REPLAY_TIMEOUT_S, 'max_log_lines': 100}}
     webhook = config.setdefault('platforms', {}).setdefault('webhook', {})
     # The rig owns this home: drop an older route so `setup --apply` installs the current one (it refuses to
     # replace a route that differs, which is the right behaviour for a user's profile).

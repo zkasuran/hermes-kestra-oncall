@@ -69,21 +69,33 @@ def save_gateway_excerpt() -> None:
     out.write_text('\n'.join(lines) + '\n')
 
 
+# Paths whose bytes decide what the e2e proved. Docs, README, catalog, assets and evidence do not.
+RUNTIME_PATHS = ['__init__.py', 'plugin.yaml', 'settings.py', 'tools.py', 'hooks.py', 'commands.py', 'cli.py', 'client.py',
+                 'store.py', 'flowsrc.py', 'incidents.py', 'pauses.py', 'skills', 'dashboard', 'desktop', 'kestra', 'rig',
+                 'release', 'tests/conftest.py', 'tests/e2e', 'tests/unit']
+
+
 def git_state() -> dict:
-    """Commit and tree of the code that was tested, and whether any tracked file differs from it."""
+    """The commit the e2e ran on (evidence/e2e-run-commit.txt, written when the run started on a clean tree),
+    the commit now, and whether anything that decides the result differs between them or from the worktree."""
     def run(*a):
         return subprocess.run(['git', *a], cwd=ROOT, capture_output=True, text=True).stdout.strip()
-    dirty = [l for l in run('status', '--porcelain', '--untracked-files=no', '--', '.', ':!evidence', ':!.work').splitlines() if l]
-    return {'commit': run('rev-parse', 'HEAD'), 'tree': run('rev-parse', 'HEAD^{tree}'), 'dirty_tracked_files': dirty,
+    marker = ROOT / 'evidence/e2e-run-commit.txt'
+    e2e_commit = marker.read_text().split()[0] if marker.exists() else ''
+    dirty = [l for l in run('status', '--porcelain', '--untracked-files=no', '--', *RUNTIME_PATHS).splitlines() if l]
+    changed = [l for l in run('diff', '--name-only', e2e_commit, 'HEAD', '--', *RUNTIME_PATHS).splitlines() if l] if e2e_commit else ['(no evidence/e2e-run-commit.txt)']
+    return {'commit': run('rev-parse', 'HEAD'), 'tree': run('rev-parse', 'HEAD^{tree}'), 'e2e_ran_on_commit': e2e_commit,
+            'runtime_files_changed_since_e2e': changed, 'dirty_tracked_files': dirty,
             'branch': run('rev-parse', '--abbrev-ref', 'HEAD'), 'commit_subject': run('log', '-1', '--format=%s')}
 
 
 def main() -> None:
     allow_dirty = '--allow-dirty' in sys.argv
     state = git_state()
-    if state['dirty_tracked_files'] and not allow_dirty:
-        raise SystemExit('refusing: tracked files differ from HEAD, so the evidence would not describe a commit:\n  '
-                         + '\n  '.join(state['dirty_tracked_files']) + '\nCommit, rerun the e2e, then run this again (or --allow-dirty for a draft).')
+    problems = state['dirty_tracked_files'] + state['runtime_files_changed_since_e2e']
+    if problems and not allow_dirty:
+        raise SystemExit('refusing: files that decide the result differ from the tested commit or from HEAD, so the evidence would not describe a commit:\n  '
+                         + '\n  '.join(problems) + '\nCommit, rerun the e2e (which writes evidence/e2e-run-commit.txt), then run this again (or --allow-dirty for a draft).')
     save_gateway_excerpt()
     api = API()
     results_path = ROOT / 'evidence/e2e-results.json'
@@ -103,7 +115,7 @@ def main() -> None:
     manifest = {
         'generated': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
         'tested_commit': state,
-        'draft': bool(state['dirty_tracked_files']),
+        'draft': bool(state['dirty_tracked_files'] or state['runtime_files_changed_since_e2e']),
         'versions': {
             'kestra': api.request('GET', '/api/v1/configs')['version'],
             'hermes_commit': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=HERMES, capture_output=True, text=True).stdout.strip(),

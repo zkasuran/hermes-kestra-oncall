@@ -157,6 +157,7 @@ class API:
 
 RIG_NAMESPACES = "['hko.demo', 'hko.e2e']"
 RIG_KESTRA_URL = 'http://127.0.0.1:28090'
+REPLAY_TIMEOUT_S = 30  # plugin setting replay_timeout_seconds in the rig; e2e lock and slow-replay timing derive from it
 
 
 def render_forwarder(source: str, *, flow_id: str = 'hermes_oncall_forwarder', namespace: str = 'hko.system',

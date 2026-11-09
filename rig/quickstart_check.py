@@ -153,6 +153,13 @@ def main() -> int:
         hermes('config', 'set', 'providers.agentrouter.transport', 'codex_responses')
         hermes('config', 'set', 'model.default', 'gpt-6-astra')
         hermes('config', 'set', 'model.provider', 'custom:agentrouter')
+        # the shared pool rate-limits gpt-6-astra under load: same fallbacks as the main rig
+        from ruamel.yaml import YAML
+        yaml = YAML()
+        cfg = yaml.load(home / 'config.yaml')
+        cfg['fallback_providers'] = [{'provider': 'custom:agentrouter', 'model': 'gpt-6.1-sol'}, {'provider': 'custom:agentrouter', 'model': 'gpt-5.6-sol'}]
+        with (home / 'config.yaml').open('w') as handle:
+            yaml.dump(cfg, handle)
         # README requirement 1: the webhook adapter needs aiohttp, and the managed environment Hermes switches to after
         # a plugin with python_dependencies is enabled does not have it. rig/deps.py installs the pinned version.
         subprocess.run([str(PY), str(ROOT / 'rig/deps.py')], env=dict(env, HKO_RIG_HOME=str(home)), check=True, capture_output=True, timeout=300, cwd=str(ROOT / 'rig'))
@@ -245,7 +252,7 @@ def main() -> int:
         total = round(sum(s['seconds'] for s in steps), 1)
         result = {'generated': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'steps': steps, 'total_seconds': total,
                   'substitutions': ['local plugin path instead of the GitHub install line', '--deliver log (no chat bot on this machine)',
-                                    'model block written into config.yaml', 'aiohttp installed into the managed environment (README requirement 1) by rig/deps.py', f'ports {KPORT} (Kestra) and {WPORT} (webhook)'],
+                                    'model block and fallback models written into config.yaml', 'aiohttp installed into the managed environment (README requirement 1) by rig/deps.py', f'ports {KPORT} (Kestra) and {WPORT} (webhook)'],
                   'completed_all_steps': len(steps) == 8 and all(s['ok'] for s in steps)}
         save_json(ROOT / 'evidence/quickstart-check.json', result)
         print(f'total {total}s, all steps ok: {result["completed_all_steps"]}')

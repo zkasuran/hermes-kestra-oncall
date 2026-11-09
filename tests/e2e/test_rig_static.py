@@ -84,10 +84,16 @@ def test_secret_probe_is_a_rig_tool_not_a_shipped_flow():
     assert (ROOT / 'rig/flows/secret_probe.yaml').exists()
 
 
-def test_manifest_refuses_a_dirty_tree_and_names_the_commit():
+def test_manifest_refuses_a_dirty_tree_and_names_both_commits():
     source = (ROOT / 'evidence/make_manifest.py').read_text()
-    assert "'--untracked-files=no'" in source and 'refusing: tracked files differ from HEAD' in source
-    assert "'tested_commit': state" in source and "rev-parse', 'HEAD^{tree}'" in source
+    assert "'--untracked-files=no'" in source and 'refusing: files that decide the result differ' in source
+    assert "'tested_commit': state" in source and "'e2e_ran_on_commit'" in source and "rev-parse', 'HEAD^{tree}'" in source
+    assert 'RUNTIME_PATHS' in source and 'README.md' not in source.split('RUNTIME_PATHS = [')[1].split(']')[0]   # docs edits do not invalidate the run
+
+
+def test_a_full_e2e_run_records_the_commit_it_ran_on():
+    source = (ROOT / 'tests/e2e/run_e2e.py').read_text()
+    assert "e2e-run-commit.txt" in source and 'DIRTY' in source
 
 
 def test_release_export_is_an_allow_list_built_from_the_commit():

@@ -27,7 +27,7 @@ import traceback
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'rig'))
-from common import API, HERMES, HOME, RUN, render_forwarder, save_json  # noqa: E402
+from common import API, HERMES, HOME, REPLAY_TIMEOUT_S, RUN, render_forwarder, save_json  # noqa: E402
 
 PY = str(HERMES / '.venv/bin/python')
 DRIVER = ROOT / 'tests/e2e/hermes_driver.py'
@@ -37,8 +37,7 @@ EVIDENCE = ROOT / 'evidence'
 FORWARDER = ('hko.system', 'hermes_oncall_forwarder')
 ETL_BASE = (ROOT / 'kestra/demo/orders_etl.yaml').read_text()
 TERMINAL = ('SUCCESS', 'FAILED', 'KILLED', 'WARNING', 'CANCELLED')
-SLOW_SECONDS = 45
-REPLAY_TIMEOUT_S = 30  # rig/hermes_home.py: replay_timeout_seconds
+SLOW_SECONDS = REPLAY_TIMEOUT_S + 15  # the fixed task must outlast the wait
 LOCK_TTL_S = REPLAY_TIMEOUT_S + 120  # incidents.apply_fix: replay_timeout_s + 120
 SKIP_LOCK_WAIT = False  # --skip-lock-wait: expire the dead process's lock row instead of waiting (quick re-runs only)
 
@@ -697,7 +696,7 @@ def s9_slow_replay(api: API, state: dict) -> Scenario:
     waited = time.time() - t0
     out = str(first['output'])
     sc.check('first apply returns pending (not rolled back, not verified)', 'replay still running' in out and 'nothing was rolled back' in out, out[:400])
-    sc.check('the apply waited about the configured replay timeout before giving up', 25 <= waited <= 90, round(waited, 1))
+    sc.check('the apply waited about the configured replay timeout before giving up', REPLAY_TIMEOUT_S - 5 <= waited <= REPLAY_TIMEOUT_S + 60, round(waited, 1))
     after = flow(api, ns, fid)
     sc.check('the fix is still live: revision base+1 and source = proposal', after['revision'] == base['revision'] + 1 and after['source'] == fixed, after['revision'])
     replays = replays_of(api, ns, fid, failed['id'])
@@ -990,6 +989,12 @@ def main() -> int:
     if 'S6' in only:
         only |= {'S6A', 'S6B'}
     api = API()
+    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=no', '--', '__init__.py', 'plugin.yaml', 'settings.py', 'tools.py', 'hooks.py',
+                            'commands.py', 'cli.py', 'client.py', 'store.py', 'flowsrc.py', 'incidents.py', 'pauses.py', 'skills', 'dashboard', 'desktop',
+                            'kestra', 'rig', 'tests/e2e'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    if not only:  # a full run is evidence: remember which commit it ran on, and say so when the tree was not clean
+        (EVIDENCE / 'e2e-run-commit.txt').write_text(head + ('  (DIRTY: ' + ' '.join(dirty.split()) + ')' if dirty else '') + '\n')
     state: dict = {'revisions': {}}
     for fid in ('protected_ledger', 'orders_etl', 'healthy_report', 'refund_approval'):
         state['revisions'][fid] = flow(api, 'hko.demo', fid)['revision']

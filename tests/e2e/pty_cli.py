@@ -45,11 +45,15 @@ def main() -> int:
     deadline = time.time() + 90
     while time.time() < deadline and 'Type your message' not in screen:
         screen += drain(child, 1)
+    screen += drain(child, 12)  # the banner appears before the input line accepts keys; a first command typed too early is lost
     results = []
     for spec in sys.argv[1:]:
         typed, _, expect = spec.partition('|')
         child.send(typed + '\r')
         start, seen = time.time(), ''
+        seen += drain(child, 4)
+        if typed not in ANSI.sub('', seen):      # not even echoed: the UI was not ready, type it again
+            child.send(typed + '\r')
         while time.time() - start < 150:
             seen += drain(child, 1)
             if expect in ANSI.sub('', seen):

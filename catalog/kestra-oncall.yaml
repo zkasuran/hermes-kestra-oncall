@@ -11,21 +11,24 @@ description: >-
   asks you in chat. After one approval it saves the fix as a new flow revision, replays the failed execution
   from the task that failed (tasks that already succeeded are not rerun), follows the replay and checks the
   result. A failed replay restores the previous revision if the flow is still at the fixed one. Kestra Pause
-  tasks become chat questions you can answer from any Hermes surface, and a Kestra on-call dashboard tab
-  lists open incidents, proposals and pauses (read-only). Disclosure: network: only the Kestra URL you
-  configure (kestra_url, HTTPS required unless loopback), using the Kestra credentials you give Hermes
-  (KESTRA_USERNAME and KESTRA_PASSWORD, or KESTRA_API_TOKEN, read through Hermes secret scope); no other
-  host, no telemetry. Writes to Kestra are limited to a flow update, a replay, a rollback to the previous
-  revision, and resume or kill of a paused execution; the two write tools (kestra_apply_fix and
-  kestra_pause_decide) go through Hermes's approval prompt with the stored diff or the frozen inputs, bound to the
-  exact proposal hash, and are refused in webhook, cron and single-query runs. It fails closed: an empty
-  namespaces setting allows nothing, and protected_flows are diagnosis-only. Stores incidents, flow
-  sources, error logs, diffs, proposals and decision records in the plugin's profile-scoped SQLite database.
-  The webhook route it can install (hermes kestra-oncall setup --apply) only adds one named route to
-  config.yaml and never deploys a Kestra flow. The dashboard routes under /api/plugins/kestra-oncall only
-  read and show diffs and logs to anyone who can open the Hermes dashboard. The tools return flow sources, error logs,
-  task outputs and execution inputs to the model, so that data goes to the profile's LLM provider. Anyone holding
-  WEBHOOK_SECRET can start a read-only model run against your Kestra. AI-assisted implementation.
+  tasks become chat questions you can answer from any Hermes surface. A Kestra on-call dashboard tab and Desktop
+  pane list incidents, proposals and pauses (read-only).
+  Disclosure: network: only the Kestra URL you configure (kestra_url, HTTPS required except for loopback and
+  explicitly allowed private hosts), with the Kestra credentials you give Hermes (KESTRA_USERNAME and
+  KESTRA_PASSWORD or KESTRA_API_TOKEN, read through Hermes secret scope). No other host, no telemetry.
+  Writes to Kestra: a flow update, a replay, a rollback to the previous revision and resume or kill of a
+  paused execution. Each needs a person: the typed command /kestra apply <id> <hash> (the hash must match the
+  stored proposal) or Hermes's approval card for the two write tools with the whole stored diff, bound to the
+  proposal hash. Diffs too long to read in full are refused. The write tools refuse in webhook, cron,
+  single-query and unknown surfaces and the model-driven path refuses while Hermes approvals are bypassed.
+  Fails closed: an empty namespaces setting allows nothing and protected_flows are diagnosis-only.
+  Stored data: incidents, flow sources, error logs, task outputs, diffs, proposals and decision records in the
+  plugin's profile-scoped SQLite database. Data sent elsewhere: the tools return flow sources, error logs,
+  task outputs and execution inputs to the model, so they go to the profile's LLM provider. The dashboard routes
+  under /api/plugins/kestra-oncall only read and show diffs and logs to anyone who can open the Hermes
+  dashboard. hermes kestra-oncall setup --apply adds one named webhook route to config.yaml and never deploys a
+  Kestra flow. Anyone holding WEBHOOK_SECRET can start a read-only model run against your Kestra.
+  AI-assisted implementation.
 maintainer: zkasuran
 tier: community
 category: automation
@@ -42,7 +45,7 @@ readme: true
 platforms: []
 known_issues:
   - "Kestra has no compare-and-set on flow updates, so the check-then-write window is narrowed by a fresh re-read and a read-back, not removed."
-  - "Slash-command writes are typed approvals (/kestra apply <id> <hash>) because ctx.dispatch_tool does not run pre_tool_call hooks on Hermes main or v0.23.0, and a plugin command has no way to raise an approval card in a chat."
+  - "Slash-command writes are typed approvals (/kestra apply <id> <hash>) because ctx.dispatch_tool does not run pre_tool_call hooks on Hermes main or v0.23.0 and a plugin command has no way to raise an approval card in a chat."
   - "Model-driven writes are refused while Hermes approvals are bypassed (--yolo, /yolo, approvals.mode: off). The check imports tools.approval.is_approval_bypass_active, which hermes plugins validate reports as one non-public import."
   - "Built for plugins.isolation: in_process (Hermes's default). Host isolation skips CLI registration and was not tested."
   - "Tested on Kestra 2.0.9 only. A failed Loop cannot be replayed on that version and a failed Subflow is diagnosis-only."

@@ -12,7 +12,7 @@ Before recording, from a clean state: `rig/reset.sh` (or deploy `kestra/demo/ord
 |---|---|---|---|
 | 1 | 0:00 to 0:06 | Kestra UI, flow `orders_etl` topology: `extract`, `transform`, `load`. Cursor on **Execute**. | "A daily pipeline. The supplier just renamed a column." |
 | 2 | 0:06 to 0:14 | Execution runs. `extract` goes green, `transform` goes red. Execution page shows FAILED with the ValueError in the logs. | "It fails in transform. Normally this waits until someone wakes up." |
-| 3 | 0:14 to 0:24 | Cut to the phone. Telegram message from Hermes arrives: incident id, one sentence of root cause ("the CSV column is now `total_amount`, the script reads `amount`"), the diff with one `-` line and one `+` line, `/kestra apply INC-... <hash>` with the 12-character hash already filled in [REAL: incident id and hash]. | "Hermes got the failure, read the logs and what changed, and proposes a fix. It has changed nothing yet." |
+| 3 | 0:14 to 0:24 | Cut to the phone. Telegram message from Hermes arrives: incident id, one sentence of root cause ("the CSV column is now `total_amount`, the script reads `amount`"), the diff with one `-` line and one `+` line, `/kestra apply INC-... <hash>` with the 12-character hash already filled in [REAL: incident id and hash]. | "Hermes got the failure, read the logs and what changed and proposes a fix. It has changed nothing yet." |
 | 4 | 0:24 to 0:30 | Phone: scroll the diff slowly. Highlight the SHA-256 line. | "This diff is exactly what will be written. The approval is tied to its hash." |
 | 5 | 0:30 to 0:40 | Phone: copy the printed command and send it: `/kestra apply INC-... <hash>`. The reply says the fix is being applied against base revision [REAL: revision]. | "One approval: you type the command that names the hash of the diff you read. A different diff would be refused." |
 | 6 | 0:40 to 0:55 | Split screen. Phone: "applying", then "verified". Kestra UI (right): flow revision 1 becomes 2, a new execution appears, `extract` is already green and is not running, `transform` and `load` run and go green. | "It saves a new revision, then replays from the failed task. `extract` is not run again." |
@@ -36,7 +36,7 @@ If the cut runs long, drop shot 8 first, then shot 9. Shots 1 to 7 are the story
 ## X post (279 characters, under 280)
 
 ```
-A Kestra flow failed. Hermes read the logs, sent the diff to my phone, and after one approval fixed the flow and replayed from the failed task. The task that already succeeded did not rerun.
+A Kestra flow failed. Hermes read the logs, sent the diff to my phone and after one approval fixed the flow and replayed from the failed task. The task that already succeeded did not rerun.
 
 Kestra On-Call for @NousResearch Hermes Agent:
 github.com/zkasuran/hermes-kestra-oncall
@@ -50,11 +50,11 @@ The form questions were not available when this was written. Adjust the labels t
 
 **Project name:** Kestra On-Call for Hermes Agent (`kestra-oncall`)
 
-**One sentence:** A Hermes plugin that puts Hermes on call for Kestra: it diagnoses a failed execution, proposes a fix, and after one human approval updates the flow and replays from the failed task.
+**One sentence:** A Hermes plugin that puts Hermes on call for Kestra: it diagnoses a failed execution, proposes a fix and after one human approval updates the flow and replays from the failed task.
 
-**What it does:** When an execution in an allowed Kestra namespace fails, Hermes reads the failed task, error logs and a diff against the last good run, and proposes the smallest flow change. The plugin validates the proposal with Kestra, stores it, and shows the exact diff and hash in chat. After approval it saves a new flow revision, replays the failed execution from the failed task (earlier successful tasks are reused), follows the replay and verifies it. If the replay fails it restores the previous revision when the flow is still at the fixed one. Kestra Pause tasks become chat questions that can be resumed or killed from any Hermes surface. A read-only dashboard tab and Desktop pane list incidents and pauses.
+**What it does:** When an execution in an allowed Kestra namespace fails, Hermes reads the failed task, error logs and a diff against the last good run and proposes the smallest flow change. The plugin validates the proposal with Kestra, stores it and shows the exact diff and hash in chat. After approval it saves a new flow revision, replays the failed execution from the failed task (earlier successful tasks are reused), follows the replay and verifies it. If the replay fails it restores the previous revision when the flow is still at the fixed one. Kestra Pause tasks become chat questions that can be resumed or killed from any Hermes surface. A read-only dashboard tab and Desktop pane list incidents and pauses.
 
-**Why it is more than a prompt or a skill:** It registers seven tools, a `pre_tool_call` approval hook, a `/kestra` command, a CLI (`setup`, `doctor`), a webhook route, a bundled skill, a SQLite store with a step journal, and a dashboard tab with its own read-only API. The write path is idempotent and resumable: stale guard, read-back after the write, one replay adopted on retry, guarded rollback.
+**Why it is more than a prompt or a skill:** It registers seven tools, a `pre_tool_call` approval hook, a `/kestra` command, a CLI (`setup`, `doctor`), a webhook route, a bundled skill, a SQLite store with a step journal and a dashboard tab with its own read-only API. The write path is idempotent and resumable: stale guard, read-back after the write, one replay adopted on retry, guarded rollback.
 
 **Who it is for:** Anyone who runs Kestra pipelines and wants failures triaged and repaired without opening the UI at night, while keeping a human in the loop for every write.
 
