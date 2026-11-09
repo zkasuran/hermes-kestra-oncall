@@ -1,0 +1,34 @@
+id: hermes_oncall_forwarder
+namespace: hko.system
+description: Forward allowed failed executions to the authenticated Hermes route.
+disabled: true
+tasks:
+  - id: notify_hermes
+    type: io.kestra.plugin.core.http.Request
+    uri: "{{ secret('HERMES_WEBHOOK_URL') }}"
+    method: POST
+    contentType: application/json
+    headers:
+      X-Gitlab-Token: "{{ secret('HERMES_WEBHOOK_TOKEN') }}"
+      X-Request-ID: "{{ trigger.executionId }}"
+    options:
+      readTimeout: PT10S
+      connectTimeout: PT5S
+    body: |
+      {
+        "event_type": "kestra.execution.failed",
+        "execution_id": "{{ trigger.executionId }}",
+        "namespace": "{{ trigger.namespace }}",
+        "flow_id": "{{ trigger.flowId }}",
+        "flow_revision": {{ trigger.flowRevision }},
+        "state": "{{ trigger.state }}",
+        "started": "{{ trigger.startDate }}",
+        "ended": "{{ trigger.endDate }}",
+        "kestra_url": "http://127.0.0.1:28090"
+      }
+triggers:
+  - id: allowed_failure
+    type: io.kestra.plugin.core.trigger.Flow
+    states: [FAILED]
+    allowConcurrent: true
+    when: "{{ flow.namespace == 'hko.demo' or (flow.namespace | startsWith('hko.demo.')) or flow.namespace == 'hko.e2e' or (flow.namespace | startsWith('hko.e2e.')) }}"

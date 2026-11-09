@@ -1,0 +1,69 @@
+name: kestra-oncall
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+requires_hermes: ">=0.23.0"
+description: >-
+  Diagnose failed Kestra executions, propose flow fixes and bring Pause decisions to chat.
+  Disclosure: calls the configured Kestra API, stores incident sources, logs, diffs and
+  decision records in profile-scoped SQLite, and updates flows, replays executions or
+  resumes/kills paused executions only through approval-gated tools. Failed replays may
+  restore the base flow revision. No telemetry. AI-assisted implementation.
+python_dependencies:
+  - ruamel.yaml==0.18.16
+provides_tools:
+  - kestra_status
+  - kestra_incident_open
+  - kestra_incidents
+  - kestra_propose_fix
+  - kestra_apply_fix
+  - kestra_pauses
+  - kestra_pause_decide
+provides_hooks:
+  - pre_tool_call
+requires_env: []
+capabilities: []
+config_schema:
+  kestra_url:
+    type: str
+    default: http://127.0.0.1:8080
+    description: Kestra server origin. Use HTTPS remotely. Credentials do not belong in this URL.
+  tenant:
+    type: str
+    default: main
+    description: Kestra tenant id.
+  namespaces:
+    type: list
+    default: []
+    description: Allowed namespace prefixes. Empty denies all incidents and writes. Use exact namespace segments.
+  protected_flows:
+    type: list
+    default: []
+    description: Exact namespace.flowId identifiers allowed for diagnosis only.
+  rollback_on_failure:
+    type: bool
+    default: true
+    description: Restore the proposal base source after a failed replay if the fixed revision is still current.
+  replay_timeout_seconds:
+    type: int
+    default: 300
+    description: Maximum replay wait in seconds, from 1 to 300.
+  max_log_lines:
+    type: int
+    default: 200
+    description: Maximum error log lines per incident, from 1 to 200.
+  username:
+    type: secret
+    env: KESTRA_USERNAME
+    required: false
+    description: Basic auth username. Supply this and password, or use api_token.
+  password:
+    type: secret
+    env: KESTRA_PASSWORD
+    required: false
+    description: Basic auth password, stored through Hermes credential settings.
+  api_token:
+    type: secret
+    env: KESTRA_API_TOKEN
+    required: false
+    description: Optional Kestra API token, used instead of basic authentication.

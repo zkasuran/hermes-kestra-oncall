@@ -1,0 +1,24 @@
+id: refund_approval
+namespace: hko.demo
+description: Approve a deterministic 12.50 refund for order A100.
+tasks:
+  - id: refund_request
+    type: io.kestra.plugin.core.debug.Return
+    format: '{"order_id":"A100","refund":"12.50"}'
+  - id: approval
+    type: io.kestra.plugin.core.flow.Pause
+    description: Approve refund A100 and give an audit reason.
+    onResume:
+      - id: approved
+        type: BOOL
+        required: true
+      - id: reason
+        type: STRING
+        required: true
+  - id: record_decision
+    type: io.kestra.plugin.core.debug.Return
+    format: "{{ outputs.approval.onResume | toJson }}"
+outputs:
+  - id: decision
+    type: JSON
+    value: "{{ outputs.record_decision.value }}"

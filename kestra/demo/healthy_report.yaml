@@ -1,0 +1,7 @@
+id: healthy_report
+namespace: hko.demo
+description: Healthy control. Its success must never open an incident.
+tasks:
+  - id: report
+    type: io.kestra.plugin.core.debug.Return
+    format: '{"orders":3,"total":"49.75","status":"healthy"}'
