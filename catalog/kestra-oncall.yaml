@@ -4,7 +4,7 @@
 name: kestra-oncall
 title: Kestra On-Call
 repo: https://github.com/zkasuran/hermes-kestra-oncall
-sha: "0000000000000000000000000000000000000000"
+sha: "9714ac0d65ec1c887c7b250ec6f8709791ee5e25"
 description: >-
   Puts Hermes on call for Kestra. When an execution in an allowed namespace fails, Hermes reads the failed
   task, its error logs and what changed since the last good run, proposes the smallest fix to the flow and
@@ -36,11 +36,11 @@ requires_hermes: ">=0.23.0"
 docs_url: https://github.com/zkasuran/hermes-kestra-oncall#readme
 version: "0.1.0"
 # The images are in assets/ in the repository. Pin these URLs to the same sha as `sha` above.
-image: https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/0000000000000000000000000000000000000000/assets/banner.png
+image: https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/9714ac0d65ec1c887c7b250ec6f8709791ee5e25/assets/banner.png
 screenshots:
-  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/0000000000000000000000000000000000000000/assets/01-chat-diagnosis.png
-  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/0000000000000000000000000000000000000000/assets/02-kestra-replay.png
-  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/0000000000000000000000000000000000000000/assets/03-dashboard.png
+  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/9714ac0d65ec1c887c7b250ec6f8709791ee5e25/assets/01-chat-diagnosis.png
+  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/9714ac0d65ec1c887c7b250ec6f8709791ee5e25/assets/02-kestra-replay.png
+  - https://raw.githubusercontent.com/zkasuran/hermes-kestra-oncall/9714ac0d65ec1c887c7b250ec6f8709791ee5e25/assets/03-dashboard.png
 readme: true
 platforms: []
 known_issues:
