@@ -4,7 +4,7 @@ Target length: 85 seconds. Hard limit: 90 seconds. Record at 1080p. Phone chat o
 
 Before recording, from a clean state: `rig/reset.sh` (or deploy `kestra/demo/orders_etl.yaml` at revision 1), the forwarder enabled, Hermes gateway running with the webhook route and a Telegram delivery target. Run the flow once, off camera, only if you want a failed execution already in the list. Better: trigger it on camera in shot 2.
 
-<!-- TODO(orchestrator): after the e2e run, replace the placeholders marked [REAL] with the measured values (times, revision numbers, incident id) from evidence/. Never state a number that is not in evidence/. -->
+The ids below come from the recorded end-to-end run in `evidence/E2E-SUMMARY.md` (scenario S2): incident `INC-fc91a049`, proposal hash starting `31586e7fb15f`, base revision 38, fixed revision 39, failing execution `7eZeCyhn4dSx05ZFsFc3IF`, replay `3UfvbR34JO0ayEkwdLQ7oC`. A new take has its own ids. Read them from your own run and never say a number that is not on screen or in the evidence.
 
 ## Shots
 
@@ -12,11 +12,11 @@ Before recording, from a clean state: `rig/reset.sh` (or deploy `kestra/demo/ord
 |---|---|---|---|
 | 1 | 0:00 to 0:06 | Kestra UI, flow `orders_etl` topology: `extract`, `transform`, `load`. Cursor on **Execute**. | "A daily pipeline. The supplier just renamed a column." |
 | 2 | 0:06 to 0:14 | Execution runs. `extract` goes green, `transform` goes red. Execution page shows FAILED with the ValueError in the logs. | "It fails in transform. Normally this waits until someone wakes up." |
-| 3 | 0:14 to 0:24 | Cut to the phone. Telegram message from Hermes arrives: incident id, one sentence of root cause ("the CSV column is now `total_amount`, the script reads `amount`"), the diff with one `-` line and one `+` line, `/kestra apply INC-... <hash>` with the 12-character hash already filled in [REAL: incident id and hash]. | "Hermes got the failure, read the logs and what changed and proposes a fix. It has changed nothing yet." |
+| 3 | 0:14 to 0:24 | Cut to the phone. Telegram message from Hermes arrives: incident id, one sentence of root cause ("the CSV column is now `total_amount`, the script reads `amount`"), the diff with one `-` line and one `+` line, `/kestra apply INC-... <hash>` with the 12-character hash already filled in (recorded run: `INC-fc91a049`, hash `31586e7fb15f`). | "Hermes got the failure, read the logs and what changed and proposes a fix. It has changed nothing yet." |
 | 4 | 0:24 to 0:30 | Phone: scroll the diff slowly. Highlight the SHA-256 line. | "This diff is exactly what will be written. The approval is tied to its hash." |
-| 5 | 0:30 to 0:40 | Phone: copy the printed command and send it: `/kestra apply INC-... <hash>`. The reply says the fix is being applied against base revision [REAL: revision]. | "One approval: you type the command that names the hash of the diff you read. A different diff would be refused." |
+| 5 | 0:30 to 0:40 | Phone: copy the printed command and send it: `/kestra apply INC-... <hash>`. The reply says the fix is being applied against base revision (recorded run: 38). | "One approval: you type the command that names the hash of the diff you read. A different diff would be refused." |
 | 6 | 0:40 to 0:55 | Split screen. Phone: "applying", then "verified". Kestra UI (right): flow revision 1 becomes 2, a new execution appears, `extract` is already green and is not running, `transform` and `load` run and go green. | "It saves a new revision, then replays from the failed task. `extract` is not run again." |
-| 7 | 0:55 to 1:03 | Kestra execution page of the replay: Gantt view. Hover `extract` to show the original timestamps. Phone shows the final report: `verified`, fixed revision [REAL], replay execution id [REAL]. | "Verified: the failed task now succeeds and the earlier task was reused." |
+| 7 | 0:55 to 1:03 | Kestra execution page of the replay: Gantt view. Hover `extract` to show the original timestamps. Phone shows the final report: `verified`, fixed revision (recorded run: 39), replay execution id (recorded run: `3UfvbR34JO0ayEkwdLQ7oC`). | "Verified: the failed task now succeeds and the earlier task was reused." |
 | 8 | 1:03 to 1:12 | Phone: `/kestra pauses`. Shows `refund_approval` waiting with the question, its two inputs and the ready-to-type commands. Type the printed command `/kestra resume <exec> <taskrun> approved=true reason="checked"`. Kestra UI: execution goes on and finishes. | "Kestra Pause tasks become chat questions too." |
 | 9 | 1:12 to 1:20 | Hermes dashboard, **Kestra on-call** tab: incidents with status `verified`, the diff, pending pauses empty. | "A read-only dashboard tab shows every incident and pause." |
 | 10 | 1:20 to 1:25 | Title card: "Kestra On-Call for Hermes Agent". Under it: "fail-closed namespaces, protected flows, one approval, guarded rollback". Repo URL. | "Open source, MIT. github.com/zkasuran/hermes-kestra-oncall" |
@@ -60,16 +60,16 @@ The form questions were not available when this was written. Adjust the labels t
 
 **Safety and reliability:** Empty namespace list allows nothing. Protected flows are diagnosis only. Approval is bound to the stored proposal hash. Unattended runs (webhook, cron) cannot write, even if Hermes auto-approves. Credentials come only through Hermes secret scope and are redacted from everything shown. Limit stated plainly: Kestra has no compare-and-set on flow updates, so the check-then-write window is narrowed, not removed.
 
-**How it was tested:** [REAL] Fill from `evidence/`: Kestra 2.0.9, Hermes version, the end-to-end scenarios and their results (healthy control ignored, lookalike namespace ignored, protected flow refused, stale proposal refused, refused write, rollback, interrupted apply resumed, second apply is a no-op, pause stale guard), run through a real Hermes gateway and webhook with a real model.
+**How it was tested:** Kestra 2.0.9 and Hermes main at c3354ea, through a real gateway, webhook and model: 189 of 189 assertions across end-to-end scenarios S1 to S12, which read state back from Kestra and the plugin store. They cover: healthy control, lookalike namespace and protected flow ignored or diagnosis-only; deny writes nothing; stale proposal refused; a failing fix rolled back; interrupted apply resumed with one replay; second apply is a no-op; two simultaneous applies give one write; slow replay `pending` then verified; pause resume and stale guard; commands typed into the real terminal UI. Hermes v0.23.0 ran S1, S1b, S2 and S3. Details and the list of what is not covered are in the README under "Tested with".
 
 **Hermes surfaces used:** Tools, hooks (`pre_tool_call`), slash command, CLI command, bundled skill, webhook route, dashboard plugin, Desktop plugin, plugin settings and secret scope.
 
 **Repository:** https://github.com/zkasuran/hermes-kestra-oncall
 
-**Catalog PR:** [REAL] link to the `plugin-catalog/kestra-oncall.yaml` PR in NousResearch/hermes-agent.
+**Catalog PR:** paste the link to the `plugin-catalog/kestra-oncall.yaml` pull request in NousResearch/hermes-agent.
 
-**Demo video:** [REAL] link.
+**Demo video:** paste the link.
 
-**X post:** [REAL] link.
+**X post:** paste the link.
 
 **AI use disclosure:** Implementation was AI-assisted. The behaviour described above was checked against a real Kestra 2.0.9 and a real Hermes install.

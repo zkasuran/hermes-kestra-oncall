@@ -1,14 +1,16 @@
 """Render assets/01-chat-diagnosis.png from recorded data. Nothing in the picture is typed by hand.
 
 Inputs (all read-only):
-  --state-db   a copy of the rig's Hermes state.db (the webhook session with the model's reply)
-  --session    the webhook session id whose last assistant message is the reply
-  --e2e        evidence/e2e-results.json (the approval prompt text Hermes showed, captured by the harness)
-  --store-db   a copy of the plugin's SQLite store (the stored result of the apply)
-  --incident   the incident id
+  --state-db     a copy of the rig's Hermes state.db (the webhook session with the model's reply)
+  --session      the webhook session id whose last assistant message is the reply
+  --typed-output the JSON that tests/e2e/hermes_driver.py printed for `command "apply <id> <hash>"`
+                 (the plugin command handler's real reply to the typed approval)
+  --typed-text   the command text that was typed, exactly as passed to the driver
+  --store-db     a copy of the plugin's SQLite store (the stored result of the apply)
+  --incident     the incident id
 The page is a plain HTML rendering of those strings in the dashboard colours. It is not a screenshot of a chat
-client: the rig has no chat platform, and the approval was answered by the e2e harness through Hermes's real
-approval callback. The image says so in its footer.
+client: the rig has no chat platform, and the command was run through the plugin's command handler by the test
+driver. The image says so in its footer.
 """
 
 from __future__ import annotations
@@ -83,7 +85,8 @@ def markdown(text: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--state-db", required=True); ap.add_argument("--session", required=True)
-    ap.add_argument("--e2e", required=True); ap.add_argument("--store-db", required=True)
+    ap.add_argument("--typed-output", required=True); ap.add_argument("--typed-text", required=True)
+    ap.add_argument("--store-db", required=True)
     ap.add_argument("--incident", required=True); ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
@@ -91,10 +94,9 @@ def main() -> None:
     reply = db.execute("select content from messages where session_id=? and role='assistant' and content<>'' order by rowid desc limit 1", (a.session,)).fetchone()[0]
     model = db.execute("select model from sessions where id=?", (a.session,)).fetchone()[0]
 
-    e2e = json.loads(Path(a.e2e).read_text())
-    s2 = next(s for s in e2e["scenarios"] if s["id"] == "S2")
-    prompt = next(x for x in s2["assertions"] if x["name"].startswith("approval prompt shows"))["detail"][0]["description"]
-    prompt_lines = prompt.splitlines()
+    typed = json.loads(Path(a.typed_output).read_text().strip().splitlines()[-1])["output"]
+    typed_lines = typed.splitlines()
+    typed_html = f"<pre><div>{html.escape(a.typed_text)}</div></pre>" + "".join(f"<p>{inline(l)}</p>" for l in typed_lines[:2])
 
     store = sqlite3.connect(f"file:{a.store_db}?mode=ro", uri=True)
     result = json.loads(store.execute("select result from incidents where incident_id=?", (a.incident,)).fetchone()[0])
@@ -105,21 +107,15 @@ def main() -> None:
           ("reused, not re-run", ", ".join(v["reused_task_ids"])), ("outputs equal to original", v["outputs_equal"])]
     kv_html = "".join(f"<span>{html.escape(str(k))}</span><span>{html.escape(str(val))}</span>" for k, val in kv)
 
-    # The approval prompt: keep the first lines readable, show the diff as a diff.
-    head = [l for l in prompt_lines[:4]]
-    diff_start = next(i for i, l in enumerate(prompt_lines) if l.startswith("--- "))
-    diff_end = next((i for i, l in enumerate(prompt_lines) if l.startswith("Writes one flow revision")), len(prompt_lines))
-    prompt_html = "".join(f"<p>{inline(l)}</p>" for l in head) + diff_block(prompt_lines[diff_start:diff_end]) + f"<p>{inline(prompt_lines[diff_end])}</p>" if diff_end < len(prompt_lines) else ""
-
     page = f"""<!doctype html><meta charset=utf-8><style>{CSS}</style><body>
 <div class=top><span>Hermes Agent &middot; Kestra on-call</span><span>webhook session {html.escape(a.session)} &middot; {html.escape(model)}</span></div>
 <div class=wrap>
  <div class=col><div class=who>Hermes reply to the Kestra failure notification</div><div class=bubble>{markdown(reply)}</div></div>
  <div class=col>
-  <div class="bubble prompt"><div class=who>Approval prompt shown by Hermes</div>{prompt_html}</div>
+  <div class="bubble prompt"><div class=who>You type the command Hermes printed (the approval)</div>{typed_html}</div>
   <div class="bubble ok"><div class=who>Result stored by the plugin</div><p>{inline(result["message"])}</p><div class=kv>{kv_html}</div></div>
  </div></div>
-<div class=foot>Text is read from the rig: the reply from the Hermes webhook session, the prompt and the result from the end-to-end run (evidence/e2e-results.json and the plugin store). The approval was answered by the test harness through Hermes's approval callback.</div>
+<div class=foot>Text is read from the rig: the reply from the Hermes webhook session, the command reply from the plugin's command handler and the result from the plugin store. The command was run by the end-to-end test driver, not from a chat app.</div>
 """
     Path(a.out).write_text(page)
 

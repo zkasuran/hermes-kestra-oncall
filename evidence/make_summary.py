@@ -60,7 +60,7 @@ def main() -> None:
         q = json.loads(qs.read_text())
         lines += ['## README quick start, run in order on an empty HERMES_HOME', '', '| Step | Seconds | Result |', '|---|---|---|']
         for step in q['steps']:
-            lines.append(f"| {step['step']} | {step['seconds']} | {'ok' if step['ok'] else 'FAIL'} |")
+            lines.append(f"| {step['step'].replace('|', '/')} | {step['seconds']} | {'ok' if step['ok'] else 'FAIL'} |")
         lines += ['', f"Total {q['total_seconds']} s; all steps completed: {q['completed_all_steps']}. Substitutions: " + '; '.join(q['substitutions']) + '.', '']
     lines += ['## Not covered', ''] + [f'- {g}' for g in manifest.get('unverified_gaps', [])]
     (ROOT / 'evidence/E2E-SUMMARY.md').write_text('\n'.join(lines) + '\n')

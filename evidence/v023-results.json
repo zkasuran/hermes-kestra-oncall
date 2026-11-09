@@ -1,0 +1,498 @@
+{
+  "kestra_version": "2.0.9",
+  "started": "2026-11-09T12:52:07+0530",
+  "seconds": 121.2,
+  "forwarder": {
+    "revision_before": 62,
+    "revision_after": 62,
+    "disabled_during_S4_S5_S6_to_keep_the_model_out_of_scripted_proposals": true
+  },
+  "all_passed": true,
+  "scenarios": [
+    {
+      "id": "S1",
+      "title": "detect: failure -> forwarder -> Hermes webhook run (real LLM) -> incident + proposal; healthy, lookalike, protected create no proposal",
+      "passed": true,
+      "seconds": 64.0,
+      "ids": {
+        "failing": "18dqLcIUTw7RP5cCuvcHrl",
+        "healthy": "2r5J6ML2CiM8dG8vbODKp3",
+        "lookalike": "24iSD3GtTODCzrMkIs9pGM",
+        "protected": "1ftzxjTRDdTzWeCYn7Vc58",
+        "forwarder_executions": {
+          "1ftzxjTRDdTzWeCYn7Vc58": "7BiNW4bgOfzBs2gxCfaFrs",
+          "18dqLcIUTw7RP5cCuvcHrl": "4rXXf5RvjlyEzbcIYhjI81"
+        },
+        "incident": "INC-5ac79d8e",
+        "protected_incident": "INC-9ed302de"
+      },
+      "notes": [
+        "seconds from trigger to proposal: 64"
+      ],
+      "assertions": [
+        {
+          "name": "fixture end states",
+          "ok": true,
+          "detail": {
+            "orders_etl": "FAILED",
+            "healthy_report": "SUCCESS",
+            "lookalike": "FAILED",
+            "protected_ledger": "FAILED"
+          }
+        },
+        {
+          "name": "forwarder fired for orders_etl and protected_ledger",
+          "ok": true,
+          "detail": [
+            "18dqLcIUTw7RP5cCuvcHrl",
+            "1ftzxjTRDdTzWeCYn7Vc58"
+          ]
+        },
+        {
+          "name": "forwarder did NOT fire for healthy_report or the hko.lookalike failure",
+          "ok": true,
+          "detail": [
+            "18dqLcIUTw7RP5cCuvcHrl",
+            "1ftzxjTRDdTzWeCYn7Vc58"
+          ]
+        },
+        {
+          "name": "each forwarder run succeeded (webhook accepted)",
+          "ok": true,
+          "detail": {
+            "1ftzxjTRDdTzWeCYn7Vc58": "SUCCESS",
+            "18dqLcIUTw7RP5cCuvcHrl": "SUCCESS"
+          }
+        },
+        {
+          "name": "Hermes gateway received and coalesced the webhook for orders_etl",
+          "ok": true,
+          "detail": 2
+        },
+        {
+          "name": "no webhook run for healthy or lookalike",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "incident + proposal exist in the plugin store for orders_etl (written by the model through the tools)",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "incident bundle names the failed task",
+          "ok": true,
+          "detail": "transform"
+        },
+        {
+          "name": "proposal is the one-line column fix",
+          "ok": true,
+          "detail": "--- orders_etl rev 41\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n"
+        },
+        {
+          "name": "proposal stats: 1 line added, 1 removed",
+          "ok": true,
+          "detail": {
+            "added": 1,
+            "removed": 1
+          }
+        },
+        {
+          "name": "unattended run did not change the flow",
+          "ok": true,
+          "detail": 41
+        },
+        {
+          "name": "no replay exists yet (nothing applied by the webhook run)",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "protected_ledger incident exists (diagnosis allowed)",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "propose_fix refuses a protected flow",
+          "ok": true,
+          "detail": {
+            "error": "hko.demo.protected_ledger is a protected flow: diagnose only. No proposal is stored.",
+            "hint": "Check settings or refresh the incident/pause and review a fresh proposal."
+          }
+        },
+        {
+          "name": "no proposal stored for the protected flow",
+          "ok": true,
+          "detail": 0
+        },
+        {
+          "name": "protected_ledger flow untouched (revision unchanged)",
+          "ok": true,
+          "detail": 31
+        },
+        {
+          "name": "lookalike (hko.lookalike) refused by namespace policy",
+          "ok": true,
+          "detail": {
+            "error": "Namespace 'hko.lookalike' is not in the allowed namespaces ['hko.demo', 'hko.e2e']. Nothing was read or written.",
+            "hint": "Check settings or refresh the incident/pause and review a fresh proposal."
+          }
+        },
+        {
+          "name": "healthy SUCCESS execution refused (not FAILED)",
+          "ok": true,
+          "detail": {
+            "error": "Execution 2r5J6ML2CiM8dG8vbODKp3 is SUCCESS, not FAILED. Only failed executions become incidents.",
+            "hint": "Check settings or refresh the incident/pause and review a fresh proposal."
+          }
+        },
+        {
+          "name": "no incident rows for lookalike or healthy",
+          "ok": true,
+          "detail": null
+        }
+      ]
+    },
+    {
+      "id": "S1b",
+      "title": "webhook hardening: wrong token rejected, duplicate delivery ignored, a failure of the forwarder namespace never loops",
+      "passed": true,
+      "seconds": 41.9,
+      "ids": {
+        "selffail_execution": "1fgFTJi8Fa5BRS8feoVpKr"
+      },
+      "notes": [],
+      "assertions": [
+        {
+          "name": "wrong token is rejected (401)",
+          "ok": true,
+          "detail": 401
+        },
+        {
+          "name": "missing token is rejected (401)",
+          "ok": true,
+          "detail": 401
+        },
+        {
+          "name": "same delivery id as the real forward is ignored as duplicate (no second Hermes run)",
+          "ok": true,
+          "detail": {
+            "status": 200,
+            "payload": {
+              "status": "duplicate",
+              "delivery_id": "18dqLcIUTw7RP5cCuvcHrl"
+            }
+          }
+        },
+        {
+          "name": "a FAILED execution in hko.system does not fire the real forwarder (pattern excludes it)",
+          "ok": true,
+          "detail": {
+            "before": 2,
+            "after": 2
+          }
+        },
+        {
+          "name": "misconfigured copy (pattern matches its own namespace): fires once, ends SUCCESS, no loop",
+          "ok": true,
+          "detail": [
+            [
+              "7kYgUjIpIGZsyPHvNgo9d3",
+              "SUCCESS"
+            ]
+          ]
+        },
+        {
+          "name": "guard skipped the HTTP call (no notify_hermes task run)",
+          "ok": true,
+          "detail": {
+            "skip_own_namespace": "SUCCESS"
+          }
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "title": "approve and repair: deny, unattended refusal, then approved apply -> one revision, one replay from transform, extract reused, load ran",
+      "passed": true,
+      "seconds": 12.4,
+      "ids": {
+        "original_execution": "18dqLcIUTw7RP5cCuvcHrl",
+        "replay_execution": "1hF1moWsHLhcOUJrFHaSgt"
+      },
+      "notes": [],
+      "assertions": [
+        {
+          "name": "typed apply without the hash is refused (review first)",
+          "ok": true,
+          "detail": "Review first: /kestra show <id>, then type the printed command /kestra apply <id> <hash>. /kestra status | incidents | show <id> | apply <id> <hash> | pauses | resume <exec> <taskrun> [k=v ...] | kill"
+        },
+        {
+          "name": "typed apply with a hash that is not the stored proposal: refused, nothing written",
+          "ok": true,
+          "detail": "The hash deadbeef0000 does not match the stored proposal for INC-5ac79d8e (it may have changed since you looked). Nothing was written. Run /kestra show INC-5ac79d8e and type the printed command."
+        },
+        {
+          "name": "model tool path, human DENY on the approval card: nothing written",
+          "ok": true,
+          "detail": {
+            "error": "BLOCKED: User denied this potentially dangerous action (matched 'Apply fix for INC-5ac79d8e to hko.demo.orders_etl?\nBase revision: 41\nDiff stat: {\"added\": 1, \"removed\": 1}\nSummary: tasks added none; removed none; changed ['transform']; triggers unchanged; top-level sections changed ['tasks']\nProposal SHA-256: 908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e\nDiff (untrusted flow text, shown in full):\n--- orders_etl rev 41\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in rows[0]:\n           raise ValueError(f\"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.\")\n       total = sum(Decimal(row[column]) for row in rows)\n\nWrites one flow revision and replays the failed task. On failure, rollback may restore the base source.'). Do NOT retry \u2014 the user has explicitly rejected it."
+          }
+        },
+        {
+          "name": "approval card shows the STORED diff, base revision, change summary and hash",
+          "ok": true,
+          "detail": "Apply fix for INC-5ac79d8e to hko.demo.orders_etl?\nBase revision: 41\nDiff stat: {\"added\": 1, \"removed\": 1}\nSummary: tasks added none; removed none; changed ['transform']; triggers unchanged; top-level sections changed ['tasks']\nProposal SHA-256: 908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e\nDiff (untrusted flow text, shown in full):\n--- orders_etl rev 41\n+++ orders_etl proposed\n@@ -26,7 +26,7 @@\n \n       with open(\"orders.csv\", newline=\"\") as handle:\n           rows = list(csv.DictReader(handle))\n-      column = \"amount\"\n+      column = \"total_amount\"\n       if column not in"
+        },
+        {
+          "name": "unattended webhook run cannot apply (no prompt, no write)",
+          "ok": true,
+          "detail": {
+            "error": "Unattended writes are blocked: session surface 'webhook' is not a known interactive chat or terminal. Review this incident in an interactive chat. Check settings or refresh the incident/pause and review a fresh proposal."
+          }
+        },
+        {
+          "name": "unattended cron run cannot apply (no prompt, no write)",
+          "ok": true,
+          "detail": {
+            "error": "Unattended writes are blocked. Review this incident in an interactive chat. Check settings or refresh the incident/pause and review a fresh proposal."
+          }
+        },
+        {
+          "name": "a hash that is not the stored proposal is blocked before any prompt",
+          "ok": true,
+          "detail": {
+            "error": "Proposal hash mismatch. Read and approve the current stored proposal. Check settings or refresh the incident/pause and review a fresh proposal."
+          }
+        },
+        {
+          "name": "typed command with the printed hash prefix (the human approval): apply returns verified",
+          "ok": true,
+          "detail": "INC-5ac79d8e: verified\nFix applied as revision 42. Replay 1hF1moWsHLhcOUJrFHaSgt ended SUCCESS; 1 earlier task(s) were reused, not re-run.\n{\"incident_id\": \"INC-5ac79d8e\", \"status\": \"verified\", \"proposal_sha256\": \"908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e\", \"base_revision\": 41,"
+        },
+        {
+          "name": "exactly one new flow revision",
+          "ok": true,
+          "detail": {
+            "before": 41,
+            "after": 42
+          }
+        },
+        {
+          "name": "flow source equals the approved proposal bytes",
+          "ok": true,
+          "detail": null
+        },
+        {
+          "name": "exactly one replay execution of the original",
+          "ok": true,
+          "detail": [
+            "1hF1moWsHLhcOUJrFHaSgt"
+          ]
+        },
+        {
+          "name": "total executions grew by exactly one",
+          "ok": true,
+          "detail": {
+            "before": 1,
+            "after": 2
+          }
+        },
+        {
+          "name": "original execution still FAILED (audit trail)",
+          "ok": true,
+          "detail": "FAILED"
+        },
+        {
+          "name": "replay is a new execution of the fixed revision",
+          "ok": true,
+          "detail": {
+            "replay": "1hF1moWsHLhcOUJrFHaSgt",
+            "originalId": "18dqLcIUTw7RP5cCuvcHrl"
+          }
+        },
+        {
+          "name": "replay execution SUCCESS",
+          "ok": true,
+          "detail": "SUCCESS"
+        },
+        {
+          "name": "extract reused: identical attempt timestamps in original and replay",
+          "ok": true,
+          "detail": {
+            "original": [
+              [
+                "SUCCESS",
+                "2026-11-09T07:22:08.121231Z",
+                "2026-11-09T07:22:08.123672Z"
+              ]
+            ],
+            "replay": [
+              [
+                "SUCCESS",
+                "2026-11-09T07:22:08.121231Z",
+                "2026-11-09T07:22:08.123672Z"
+              ]
+            ]
+          }
+        },
+        {
+          "name": "extract not re-run: exactly one attempt",
+          "ok": true,
+          "detail": 1
+        },
+        {
+          "name": "extract outputs identical in original and replay",
+          "ok": true,
+          "detail": {
+            "original": [
+              {
+                "uri": "kestra:///hko/demo/orders-etl/executions/18dqLcIUTw7RP5cCuvcHrl/tasks/extract/5s3PmPwfxP7z0wm2d92Zce/14615852583145980134.csv"
+              }
+            ],
+            "replay": [
+              {
+                "uri": "kestra:///hko/demo/orders-etl/executions/18dqLcIUTw7RP5cCuvcHrl/tasks/extract/5s3PmPwfxP7z0wm2d92Zce/14615852583145980134.csv"
+              }
+            ]
+          }
+        },
+        {
+          "name": "transform history FAILED then SUCCESS in the replay",
+          "ok": true,
+          "detail": [
+            "FAILED",
+            "SUCCESS"
+          ]
+        },
+        {
+          "name": "load ran after the repair",
+          "ok": true,
+          "detail": "SUCCESS"
+        },
+        {
+          "name": "load did not exist in the original",
+          "ok": true,
+          "detail": [
+            "extract",
+            "transform"
+          ]
+        },
+        {
+          "name": "load wrote its summary output",
+          "ok": true,
+          "detail": [
+            {
+              "taskId": "extract",
+              "taskRunId": "1zr4mpset9Rs6VM07Jb1Rk",
+              "inline": true
+            },
+            {
+              "taskId": "transform",
+              "taskRunId": "6tfMoo33lkzGzzdpoVpIGo",
+              "inline": true
+            },
+            {
+              "taskId": "load",
+              "taskRunId": "1m8c4EfLUJCZfiybqum2eB",
+              "inline": true
+            }
+          ]
+        },
+        {
+          "name": "replay ran the fixed revision",
+          "ok": true,
+          "detail": 42
+        },
+        {
+          "name": "store journal records write then replay then verified",
+          "ok": true,
+          "detail": [
+            "opened",
+            "proposed",
+            "write_fix",
+            "fix_written",
+            "replay",
+            "replay_started",
+            "replay_finished",
+            "verified"
+          ]
+        },
+        {
+          "name": "incident status verified",
+          "ok": true,
+          "detail": "verified"
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "title": "idempotent retry: apply the same proposal again -> no revision, no replay, no journal growth",
+      "passed": true,
+      "seconds": 2.9,
+      "ids": {},
+      "notes": [],
+      "assertions": [
+        {
+          "name": "second apply reports a no-op",
+          "ok": true,
+          "detail": "INC-5ac79d8e: verified (no-op, already done)\nAlready verified. Nothing was written.\n{\"incident_id\": \"INC-5ac79d8e\", \"status\": \"verified\", \"proposal_sha256\": \"908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e\", \"base_revision\": 41, \"fixed_revision\": 42, \"rollback_revision\": null, \"orig"
+        },
+        {
+          "name": "no new flow revision",
+          "ok": true,
+          "detail": {
+            "before": {
+              "rev": 42,
+              "revisions": 27,
+              "execs": 2,
+              "steps": [
+                "opened",
+                "proposed",
+                "write_fix",
+                "fix_written",
+                "replay",
+                "replay_started",
+                "replay_finished",
+                "verified"
+              ]
+            },
+            "after": {
+              "rev": 42,
+              "revisions": 27,
+              "execs": 2,
+              "steps": [
+                "opened",
+                "proposed",
+                "write_fix",
+                "fix_written",
+                "replay",
+                "replay_started",
+                "replay_finished",
+                "verified"
+              ]
+            }
+          }
+        },
+        {
+          "name": "no new execution (no second replay)",
+          "ok": true,
+          "detail": {
+            "before": 2,
+            "after": 2
+          }
+        },
+        {
+          "name": "journal did not grow with write or replay steps",
+          "ok": true,
+          "detail": []
+        },
+        {
+          "name": "same via the model tool path: still a no-op",
+          "ok": true,
+          "detail": "{'incident_id': 'INC-5ac79d8e', 'status': 'verified', 'proposal_sha256': '908e3db54ff017909e4feb10d14c1b487361dc801f36fa98e27558953532f19e', 'base_revision': 41, 'fixed_revision': 42, 'rollback_revisi"
+        }
+      ]
+    }
+  ]
+}

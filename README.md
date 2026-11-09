@@ -4,11 +4,11 @@ Hermes watches your Kestra executions. When one fails, it reads the failed task,
 
 It also turns every Kestra `Pause` task into a chat question you can answer from any Hermes surface, including your phone.
 
-| Hermes reply, approval prompt and result | Kestra after the replay | Dashboard tab |
+| Hermes reply, typed approval and result | Kestra after the replay | Dashboard tab |
 |---|---|---|
-| ![Hermes reply with root cause and diff, the approval prompt and the stored result](assets/01-chat-diagnosis.png) | ![Kestra Gantt of the replay: extract reused, transform succeeded on attempt 2](assets/02-kestra-replay.png) | ![Kestra on-call tab in the Hermes dashboard](assets/03-dashboard.png) |
+| ![Hermes reply with root cause, diff and the command to type, the command's reply and the stored result](assets/01-chat-diagnosis.png) | ![Kestra Gantt of the replay: extract reused, transform succeeded on attempt 2](assets/02-kestra-replay.png) | ![Kestra on-call tab in the Hermes dashboard](assets/03-dashboard.png) |
 
-The pictures come from the end-to-end rig on Kestra 2.0.9. The left one is rendered from recorded text (the webhook session's reply, the approval prompt and the stored result), because the rig has no chat app and the test harness answered the approval. The middle one is the Kestra UI. The right one is the real dashboard tab reading the rig's incident store. The scripts that made them are on the development branch (see Development).
+The pictures come from the end-to-end rig on Kestra 2.0.9. The left one is rendered from recorded text (the webhook session's reply, the plugin's reply to the typed command and the stored result), because the rig has no chat app and the test driver typed the command. The middle one is the Kestra UI. The right one is the real dashboard tab reading the rig's incident store. The scripts that made them are on the development branch (see Development).
 
 ## What it does
 
@@ -124,7 +124,7 @@ sed -e "s#\['CHANGE_ME'\]#['demo']#" \
     -H 'Content-Type: application/x-yaml' --data-binary @-
 ```
 
-Keep that list in step with the `namespaces` setting in Hermes. The Kestra secrets `HERMES_WEBHOOK_URL` and `HERMES_WEBHOOK_TOKEN` were set in step 1. Kestra 2.0.9 does not expose flow variables inside a trigger condition, which is why the list sits in the trigger and not in a variable.
+Kestra needs about 20 seconds to register a new flow trigger, so wait before you run the demo flow. A failure in that window is not forwarded. Keep that list in step with the `namespaces` setting in Hermes. The Kestra secrets `HERMES_WEBHOOK_URL` and `HERMES_WEBHOOK_TOKEN` were set in step 1. Kestra 2.0.9 does not expose flow variables inside a trigger condition, which is why the list sits in the trigger and not in a variable.
 
 **6. Break the demo flow.** `kestra/demo/orders_etl.yaml` extracts a CSV and then fails in `transform` because the supplier renamed `amount` to `total_amount`. `protected_ledger.yaml` is a second flow that always fails and is listed in `protected_flows`, so Hermes only diagnoses it. Deploy both into namespace `demo` and run `orders_etl`:
 
@@ -224,11 +224,52 @@ The dashboard tab was run in a real `hermes dashboard` against the plugin's core
 
 ## Tested with
 
-- Kestra 2.0.9 (`kestra/kestra:v2.0.9`).
-- Hermes Agent: `hermes plugins validate --install-deps` and `hermes plugins doctor` pass on v0.23.0 and on main at c3354ea.
-- One validation warning is expected: `/kestra apply` imports `tools.approval.request_tool_approval`, because the documented `ctx.dispatch_tool` path does not run pre-tool hooks, so the command calls the approval gate itself.
+- Kestra 2.0.9 (`kestra/kestra:v2.0.9`), open-source edition, basic authentication.
+- Hermes Agent main at `c3354ea` for the full run. Hermes v0.23.0 ran scenarios S1, S1b, S2 and S3 (all passed), plus `hermes plugins validate`, `hermes plugins doctor` and a live plugin test.
+- Plugin commit `6d7e9f852c01`. The runtime files have not changed since the run (the evidence manifest on the `dev` branch records their hashes).
+- A real model (`gpt-6-astra`, with `gpt-6.1-sol` and `gpt-5.6-sol` as fallbacks when the shared pool rate-limits) wrote the proposals in S1 to S3. The other scenarios use scripted proposals so the model cannot race them.
+- `hermes plugins validate --install-deps` passes on the tree that is pinned for the catalog, with one warning: the private import `tools.approval.is_approval_bypass_active` in `settings.py`. The plugin uses it to refuse model-driven writes while Hermes approvals are bypassed. It fails closed if the check raises.
 
-<!-- TODO(orchestrator): fill from evidence/ after the e2e run: scenario table (healthy control ignored, lookalike namespace ignored, protected flow refused, stale proposal, refused write, rollback, interrupted apply resumed, second apply no-op, pause stale guard), with execution ids, revisions and the replay's reused-task proof. -->
+End-to-end scenarios, 189 of 189 assertions passed in 345.8 s. Every assertion reads state back from Kestra's API or the plugin store (revisions, replay `originalId`, attempts, outputs), not from the plugin's own answer.
+
+| Scenario | What it proves | Assertions |
+|---|---|---|
+| S1 | A failure reaches Hermes through the forwarder and webhook. A real model opens an incident and stores a proposal. The healthy flow, the lookalike namespace and the protected flow create no proposal. | 19/19 |
+| S1b | A wrong token is rejected, a duplicate delivery is ignored, a failure in the forwarder's own namespace never loops. | 6/6 |
+| S2 | Deny writes nothing. Webhook and cron runs cannot apply. A hash that is not the stored proposal is blocked before any prompt. The typed command `/kestra apply <id> <hash>` then makes exactly one revision (38 to 39 in the recorded run) and one replay from `transform`, with `extract` reused (identical attempt timestamps and outputs) and `load` run. The original stays `FAILED`. | 25/25 |
+| S3 | Applying the same proposal again changes no revision, no execution and no journal row. | 5/5 |
+| S4 | A flow edited after the proposal makes `apply` answer `stale` and write nothing. A new proposal on the new revision verifies and keeps the edit. | 11/11 |
+| S5 | A proposal that validates but still fails ends `rolled_back`: the flow source is byte-identical to the base again. | 12/12 |
+| S6a, S6b | The apply process is killed after the flow update and before the replay. The next apply adopts the written fix and starts exactly one replay. | 8/8, 15/15 |
+| S7 | A paused execution appears in `/kestra pauses` and resumes with inputs that the next task sees. Resuming from an old snapshot after an out-of-band resume is refused. Kill ends the execution. | 18/18 |
+| S8 | Two sessions approve the same proposal at the same moment: one write, one replay. | 8/8 |
+| S9 | A slow replay returns `pending` and is not rolled back. The next apply follows the same replay and verifies. | 21/21 |
+| S10 | The typed command works on a Telegram-like session where no approval card can exist. | 7/7 |
+| S11 | `Parallel` branch fixed and verified. `Loop` and `Subflow` failures are diagnosis-only. A replay that reaches a `Pause` is `pending` and then verified. A failure that is not a task failure is refused. | 26/26 |
+| S12 | Slash commands typed into the real terminal UI (`hermes chat --cli` in a pseudo-terminal), with no scripted callback and no model turn. | 8/8 |
+
+The README quick start, run in order on an empty `HERMES_HOME`:
+
+| Step | Seconds |
+|---|---|
+| 1 Start Kestra with basic auth and the two forwarder secrets | 7.9 |
+| 2 Enable the plugin (includes the dependency install) | 31.8 |
+| 3 Configure and run `doctor` | 2.9 |
+| 4 Webhook route, `WEBHOOK_SECRET`, start the gateway | 6.3 |
+| 5 Deploy the forwarder | 25.0 |
+| 6 Deploy the demo flows and run `orders_etl` | 1.6 |
+| 7a Wait for the incident and the model's proposal | 117.0 |
+| 7b Type `/kestra apply <id> <hash>` in the real terminal UI and reach `verified` | 113.3 |
+
+That is 305.8 s in total. These timings used a local plugin path instead of `hermes plugins install zkasuran/hermes-kestra-oncall`, `--deliver log` because that machine has no chat bot, a model block written into `config.yaml` and the `aiohttp` workaround from the requirements above. Step 7a depends on the model and the provider's rate limits, so it varies.
+
+Not covered:
+
+- No live Telegram, Discord or Slack client was used. The typed command ran through the plugin's command handler on a session that looks like a chat platform (S10) and in the real terminal UI (S12). Nobody clicked a Hermes approval card: the answer to the card on the model-tool path is scripted through Hermes's approval callback. The card text is captured and checked.
+- Interruption is simulated by killing the apply process at the replay call. Other kill points are covered only by the unit tests.
+- The concurrent apply test uses two processes on one machine and one SQLite store. Separate hosts with separate stores would not share the lock.
+- Kestra Enterprise, RBAC, API tokens and Kestra versions other than 2.0.9 are untested.
+- The dashboard tab ran in a real `hermes dashboard`. The Desktop pane passes `hermes plugins validate` but was not run in a Desktop build.
 
 ## Troubleshooting
 

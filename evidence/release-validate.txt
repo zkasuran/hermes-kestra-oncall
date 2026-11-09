@@ -1,0 +1,34 @@
+commit 6d7e9f852c01499ef4113bd9d506b02c870b461d; export tree sha256 440b62a7b4114fdf01b79b28bb7fc5ae5014a90cf05e82ec2303179d11ba5b74 (41 files, release/export.sh)
+Preparing the isolated Hermes runtime…
+  → Installing Python dependencies…
+  ✓ Installing Python dependencies
+  → Resolving Python dependencies…
+  ✓ Resolving Python dependencies
+  → Installing Python dependencies…
+  ✓ Installing Python dependencies
+
+✓ manifest — plugin.yaml parses
+✓ manifest fields — name, version, description present
+✓ requires_hermes — spec '>=0.23.0' parses
+✓ config schema — shape valid
+✓ requires_env — all entries UPPER_SNAKE
+✓ oauth — not declared
+✓ loadable — entry: __init__.py, desktop/plugin.js
+✓ python dependencies — 1 requirements from manifest
+✓ capability probe — register() ran in isolation
+✓ declared tools — matches registrations
+✓ declared hooks — matches registrations
+✓ declared middleware — matches registrations
+✓ built-in tool collisions — no collisions
+✓ security scan — safe
+✓ no core override — no runtime rebinds of Hermes core
+✓ desktop surface — stays inside the plugin SDK surface
+⚠ private core imports (catalog rule 9: public surfaces only; these can break on
+any release): settings.py:158 tools.approval.is_approval_bypass_active. Use 
+ctx.* / documented plugin APIs, or open an issue for the seam you need.
+◆ Isolation — runs in the plugin host (plugins.isolation: host)
+  · dashboard backend API is served through the plugin host (buffered responses)
+  · ctx.register_cli_command() is skipped in the host (`hermes <command>` 
+subcommands are wired into the local CLI parser)
+
+Validation passed.
