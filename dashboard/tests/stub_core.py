@@ -77,13 +77,17 @@ class Policy:
 
 ROWS = [
     {"incident_id": "INC-0a1b2c3d", "status": "proposed", "namespace": "hko.demo", "flow_id": "orders_etl",
-     "execution_id": "3GzyXexample1", "failed_task": {"task_id": "transform", "task_run_id": "tr1"}, "execution_revision": 3,
-     "protected": False, "logs": [{"level": "ERROR", "message": "KeyError: 'amount_usd'"}, {"level": "ERROR", "message": "Task transform failed"}]},
+     "execution_id": "3GzyXexample1", "failed_task_id": "transform", "failed_task_run_id": "tr1",
+     "failed_task": {"task_id": "transform", "task_run_id": "tr1"}, "execution_revision": 3, "protected": False,
+     "created": "2026-11-09T04:00:00Z", "updated": "2026-11-09T04:01:00Z",
+     "logs": [{"level": "ERROR", "message": "KeyError: 'amount_usd'"}, {"level": "ERROR", "message": "Task transform failed"}]},
     {"incident_id": "INC-9f8e7d6c", "status": "open", "namespace": "hko.demo", "flow_id": "protected_ledger",
-     "execution_id": "3GzyXexample2", "failed_task": "post", "execution_revision": 1, "protected": True,
-     "error_logs": ["HTTP 500 from ledger api"]},
+     "execution_id": "3GzyXexample2", "failed_task_id": "post", "failed_task_run_id": "tr2",
+     "execution_revision": 1, "protected": True, "created": "2026-11-09T03:00:00Z", "updated": "2026-11-09T03:00:00Z",
+     "logs": [{"level": "ERROR", "message": "HTTP 500 from ledger api"}]},
     {"incident_id": "INC-11223344", "status": "verified", "namespace": "hko.demo", "flow_id": "nightly_sync",
-     "execution_id": "3GzyXexample3", "failed_task": {"task_id": "load"}, "execution_revision": 2, "protected": False,
+     "execution_id": "3GzyXexample3", "failed_task_id": "load", "failed_task_run_id": "tr3", "execution_revision": 2,
+     "protected": False, "created": "2026-11-09T02:00:00Z", "updated": "2026-11-09T02:30:00Z", "logs": [],
      "result": {"status": "verified", "message": "Replay succeeded; earlier tasks reused.", "fixed_revision": 3,
                 "replay_execution_id": "5RpExample"}},
 ]
@@ -94,7 +98,8 @@ class Oncall:
         self.client, self.store, self.policy = client, store, policy
 
     def list_incidents(self, *, status=None, limit=20):
-        return [dict(r) for r in ROWS][:limit]
+        keys = ("incident_id", "execution_id", "namespace", "flow_id", "status", "failed_task_id", "created", "updated")
+        return [{k: r[k] for k in keys} for r in ROWS][:limit]
 
     def get_incident(self, incident_id):
         for row in ROWS:
@@ -116,8 +121,9 @@ class PauseDesk:
                  "paused_task_id": "approve", "paused_task_run_id": "4TrRunExample",
                  "description": "Refund of 120.00 EUR for order 5512 needs a human decision.",
                  "paused_for_seconds": 184.6,
-                 "resume_inputs": [{"id": "approved", "type": "BOOL", "required": True},
-                                   {"id": "note", "type": "STRING", "required": False}]}]
+                 "protected": False,
+                 "declared_inputs": [{"id": "approved", "type": "BOOL", "required": True, "defaults": None, "description": ""},
+                                     {"id": "note", "type": "STRING", "required": False, "defaults": None, "description": ""}]}]
 '''
 
 MODULES = {"client.py": CLIENT, "store.py": STORE, "incidents.py": INCIDENTS, "pauses.py": PAUSES}
@@ -126,7 +132,7 @@ MODULES = {"client.py": CLIENT, "store.py": STORE, "incidents.py": INCIDENTS, "p
 def make_plugin_copy(dest: Path, *, stub: bool = True) -> Path:
     """Copy the plugin (dashboard, settings, __init__) to ``dest`` and drop the stub core modules in."""
     dest.mkdir(parents=True, exist_ok=True)
-    for name in ("__init__.py", "settings.py", "plugin.yaml"):
+    for name in ("__init__.py", "settings.py", "hooks.py", "tools.py", "flowsrc.py", "plugin.yaml"):
         shutil.copy2(ROOT / name, dest / name)
     shutil.copytree(ROOT / "dashboard", dest / "dashboard", dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("tests", "__pycache__"))

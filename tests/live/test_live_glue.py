@@ -186,3 +186,9 @@ def test_plugin_loaded_by_hermes_runs_open_propose_approved_apply_and_pause(tmp_
     # 6. the slash command reads the same records
     assert "connected" in out["cmd_status"] and out["open"]["incident_id"] in out["cmd_incidents"]
     assert sha in out["cmd_show"] and "verified" in out["cmd_show"]
+    # 7. the typed command is the approval: a wrong hash is refused, the printed hash applies (core no-op here),
+    #    and no Hermes card was raised for either
+    assert "does not match" in out["cmd_apply_wrong"]
+    assert "verified" in out["cmd_apply"] and "no-op" in out["cmd_apply"]
+    assert len([p for p in out["prompts"] if "Proposal SHA-256" in p]) == 3
+    assert len(client.list_revisions(NS, flow_id)) == fixed_revision

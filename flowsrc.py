@@ -43,6 +43,7 @@ class FlowInfo:
     flow_id: str
     task_ids: list[str]
     pause_tasks: dict[str, PauseTask]
+    task_types: dict[str, str] = field(default_factory=dict)   # task id -> plugin type
 
     @property
     def qualified_id(self) -> str:
@@ -131,7 +132,10 @@ def parse_flow(source: str) -> FlowInfo:
             seen.add(task["id"])
             ids.append(task["id"])
     pauses = {t["id"]: _pause_from(t) for t in tasks if str(t["type"]).endswith(PAUSE_TYPE_SUFFIX)}
-    return FlowInfo(namespace=namespace, flow_id=flow_id, task_ids=ids, pause_tasks=pauses)
+    types = {}
+    for task in tasks:
+        types.setdefault(task["id"], str(task["type"]))
+    return FlowInfo(namespace=namespace, flow_id=flow_id, task_ids=ids, pause_tasks=pauses, task_types=types)
 
 
 def unified_diff(old: str, new: str, *, fromfile: str = "base", tofile: str = "proposed") -> str:

@@ -14,8 +14,13 @@ SECRET_NAMES = ("KESTRA_USERNAME", "KESTRA_PASSWORD", "KESTRA_API_TOKEN")
 DEFAULTS: dict[str, Any] = {
     "kestra_url": "http://127.0.0.1:8080", "tenant": "main", "namespaces": [],
     "protected_flows": [], "rollback_on_failure": True,
-    "replay_timeout_seconds": 300, "max_log_lines": 200,
+    "replay_timeout_seconds": 300, "max_log_lines": 200, "allow_insecure_http": False,
 }
+# Only these secrets are masked in output, and only when long enough to be a real secret. The username is an
+# identifier, not a secret, and a short value such as "kestra" would corrupt flow sources (io.kestra.plugin...).
+REDACT_NAMES = ("KESTRA_PASSWORD", "KESTRA_API_TOKEN")
+MIN_SECRET_LENGTH = 8
+_PRIVATE_SUFFIXES = (".local", ".internal", ".lan", ".localdomain", ".home.arpa")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\Z")
 
 
@@ -31,6 +36,19 @@ def _names(value: Any, key: str) -> list[str]:
     return list(dict.fromkeys(value))
 
 
+def _is_private_host(host: str) -> bool:
+    """Private-network hosts only: RFC 1918/ULA/link-local IPs, single-label names (Docker/compose service
+    names) and well-known private suffixes. A public DNS name never qualifies."""
+    import ipaddress
+
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        name = host.lower().rstrip(".")
+        return "." not in name or name.endswith(_PRIVATE_SUFFIXES)
+    return address.is_private and not address.is_unspecified
+
+
 @dataclass(frozen=True)
 class Settings:
     kestra_url: str = "http://127.0.0.1:8080"
@@ -40,6 +58,7 @@ class Settings:
     rollback_on_failure: bool = True
     replay_timeout_seconds: int = 300
     max_log_lines: int = 200
+    allow_insecure_http: bool = False
 
     @classmethod
     def parse(cls, values: Mapping[str, Any]) -> Settings:
@@ -57,8 +76,14 @@ class Settings:
                 or parts.password is not None or parts.query or parts.fragment or parts.path not in {"", "/"}
                 or port == 0):
             raise SettingsError("kestra_url must be an HTTP(S) origin without path, query or credentials.")
+        if type(data["allow_insecure_http"]) is not bool:
+            raise SettingsError("allow_insecure_http must be true or false, not a string.")
         if parts.scheme == "http" and parts.hostname not in {"localhost", "127.0.0.1", "::1"}:
-            raise SettingsError("Use HTTPS for a remote Kestra server; HTTP is allowed only on loopback.")
+            if not (data["allow_insecure_http"] and _is_private_host(parts.hostname)):
+                raise SettingsError(
+                    "Use HTTPS for a remote Kestra server; HTTP is allowed on loopback. For a private network or "
+                    "Docker host (for example http://kestra:8080) set allow_insecure_http: true. Basic auth is "
+                    "sent in clear text over HTTP.")
         data["kestra_url"] = url.rstrip("/")
         if not isinstance(data["tenant"], str) or not _IDENTIFIER.fullmatch(data["tenant"]):
             raise SettingsError("tenant must be a nonempty identifier.")
@@ -93,25 +118,65 @@ def session_context() -> dict[str, str]:
     from gateway.session_context import get_session_env
 
     return {name: get_session_env(name, "") or "" for name in (
-        "HERMES_SESSION_PLATFORM", "HERMES_CRON_SESSION", "HERMES_SINGLE_QUERY_SESSION",
+        "HERMES_SESSION_PLATFORM", "HERMES_SESSION_SOURCE", "HERMES_CRON_SESSION", "HERMES_SINGLE_QUERY_SESSION",
         "HERMES_SESSION_ID", "HERMES_SESSION_CHAT_ID",
     )}
 
 
+# Allow-list of surfaces where a person is present. Anything else (webhook, API server, cron, kanban worker,
+# batch runner, an agent-to-agent peer, an ACP client, or a surface added in a later Hermes) is refused.
+LOCAL_SURFACES = frozenset({"", "cli", "tui", "desktop", "local"})
+CHAT_SURFACES = frozenset({
+    "telegram", "discord", "slack", "signal", "matrix", "mattermost", "whatsapp", "whatsapp_cloud", "teams",
+    "sms", "email", "bluebubbles", "imessage", "line", "wecom", "weixin", "qqbot", "dingtalk", "feishu",
+    "google_chat", "irc", "ntfy", "simplex", "raft", "buzz", "photon",
+})
+_TRUE = {"true", "1", "yes", "on"}
+
+
 def require_attended(context: Mapping[str, str]) -> None:
     """A prompt or a permissive host override never authorizes unattended writes."""
-    platform = context.get("HERMES_SESSION_PLATFORM", "").lower()
-    if platform in {"webhook", "msgraph_webhook", "api_server", "cron"} or any(
-        str(context.get(key, "")).lower() in {"true", "1", "yes", "on"}
-        for key in ("HERMES_CRON_SESSION", "HERMES_SINGLE_QUERY_SESSION")
-    ):
+    if any(str(context.get(key, "")).lower() in _TRUE for key in ("HERMES_CRON_SESSION", "HERMES_SINGLE_QUERY_SESSION")):
         raise SettingsError("Unattended writes are blocked. Review this incident in an interactive chat.")
+    platform = str(context.get("HERMES_SESSION_PLATFORM", "")).strip().lower()
+    source = str(context.get("HERMES_SESSION_SOURCE", "")).strip().lower()
+    surface = platform or source
+    if surface not in LOCAL_SURFACES and surface not in CHAT_SURFACES:
+        raise SettingsError(f"Unattended writes are blocked: session surface {surface!r} is not a known interactive "
+                            "chat or terminal. Review this incident in an interactive chat.")
+
+
+def approvals_bypassed() -> bool:
+    """True when Hermes would auto-approve (--yolo, gateway /yolo, approvals.mode: off).
+
+    A pre_tool_call `approve` directive is then granted without showing a human anything, so the plugin refuses to
+    offer its write tools. Fails closed: if the state cannot be read the answer is True. The import is Hermes's
+    own canonical check (tools/approval.py, same on v0.23.0 and main); it is not in the public plugin API list,
+    which `hermes plugins validate` reports as one warning.
+    """
+    try:
+        from tools.approval import is_approval_bypass_active
+
+        return bool(is_approval_bypass_active())
+    except Exception:
+        return True
+
+
+BYPASS_MESSAGE = ("Hermes approval bypass is on (--yolo, /yolo, or approvals.mode: off), so a model-requested write would "
+                  "run without a human seeing it. Turn the bypass off (hermes config set approvals.mode manual, or /yolo "
+                  "off), or apply the stored proposal yourself with /kestra apply <id> <hash-prefix>.")
+
+
+def _secret_values(secrets: Mapping[str, str]) -> list[str]:
+    return sorted((v for k, v in secrets.items() if k in REDACT_NAMES and isinstance(v, str)
+                   and len(v) >= MIN_SECRET_LENGTH), key=len, reverse=True)
 
 
 def redact(value: Any, secrets: Mapping[str, str]) -> Any:
-    """Keep known credentials and credential-valued fields out of every surface."""
+    """Mask long credential values and credential-named fields. Short values and the username are left alone:
+    replacing them corrupts flow sources the model must copy back."""
     if isinstance(value, str):
-        for secret in sorted((v for v in secrets.values() if v), key=len, reverse=True):
+        for secret in _secret_values(secrets):
             value = value.replace(secret, "[REDACTED]")
         return value
     if isinstance(value, dict):

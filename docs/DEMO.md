@@ -12,12 +12,12 @@ Before recording, from a clean state: `rig/reset.sh` (or deploy `kestra/demo/ord
 |---|---|---|---|
 | 1 | 0:00 to 0:06 | Kestra UI, flow `orders_etl` topology: `extract`, `transform`, `load`. Cursor on **Execute**. | "A daily pipeline. The supplier just renamed a column." |
 | 2 | 0:06 to 0:14 | Execution runs. `extract` goes green, `transform` goes red. Execution page shows FAILED with the ValueError in the logs. | "It fails in transform. Normally this waits until someone wakes up." |
-| 3 | 0:14 to 0:24 | Cut to the phone. Telegram message from Hermes arrives: incident id, one sentence of root cause ("the CSV column is now `total_amount`, the script reads `amount`"), the diff with one `-` line and one `+` line, `/kestra apply INC-...` [REAL: incident id]. | "Hermes got the failure, read the logs and what changed, and proposes a fix. It has changed nothing yet." |
+| 3 | 0:14 to 0:24 | Cut to the phone. Telegram message from Hermes arrives: incident id, one sentence of root cause ("the CSV column is now `total_amount`, the script reads `amount`"), the diff with one `-` line and one `+` line, `/kestra apply INC-... <hash>` with the 12-character hash already filled in [REAL: incident id and hash]. | "Hermes got the failure, read the logs and what changed, and proposes a fix. It has changed nothing yet." |
 | 4 | 0:24 to 0:30 | Phone: scroll the diff slowly. Highlight the SHA-256 line. | "This diff is exactly what will be written. The approval is tied to its hash." |
-| 5 | 0:30 to 0:40 | Phone: type `/kestra apply INC-...`. The Hermes approval prompt appears with the stored diff and base revision [REAL: revision]. Tap approve once. | "One approval. The prompt is built from the saved proposal, not from model text." |
+| 5 | 0:30 to 0:40 | Phone: copy the printed command and send it: `/kestra apply INC-... <hash>`. The reply says the fix is being applied against base revision [REAL: revision]. | "One approval: you type the command that names the hash of the diff you read. A different diff would be refused." |
 | 6 | 0:40 to 0:55 | Split screen. Phone: "applying", then "verified". Kestra UI (right): flow revision 1 becomes 2, a new execution appears, `extract` is already green and is not running, `transform` and `load` run and go green. | "It saves a new revision, then replays from the failed task. `extract` is not run again." |
 | 7 | 0:55 to 1:03 | Kestra execution page of the replay: Gantt view. Hover `extract` to show the original timestamps. Phone shows the final report: `verified`, fixed revision [REAL], replay execution id [REAL]. | "Verified: the failed task now succeeds and the earlier task was reused." |
-| 8 | 1:03 to 1:12 | Phone: `/kestra pauses`. Shows `refund_approval` waiting with the question and its two inputs. Type `/kestra resume <exec> approved=true reason="checked"`, approve. Kestra UI: execution goes on and finishes. | "Kestra Pause tasks become chat questions too." |
+| 8 | 1:03 to 1:12 | Phone: `/kestra pauses`. Shows `refund_approval` waiting with the question, its two inputs and the ready-to-type commands. Type the printed command `/kestra resume <exec> <taskrun> approved=true reason="checked"`. Kestra UI: execution goes on and finishes. | "Kestra Pause tasks become chat questions too." |
 | 9 | 1:12 to 1:20 | Hermes dashboard, **Kestra on-call** tab: incidents with status `verified`, the diff, pending pauses empty. | "A read-only dashboard tab shows every incident and pause." |
 | 10 | 1:20 to 1:25 | Title card: "Kestra On-Call for Hermes Agent". Under it: "fail-closed namespaces, protected flows, one approval, guarded rollback". Repo URL. | "Open source, MIT. github.com/zkasuran/hermes-kestra-oncall" |
 
@@ -30,7 +30,7 @@ If the cut runs long, drop shot 8 first, then shot 9. Shots 1 to 7 are the story
 - Use a screen recording of the phone (or a Telegram desktop window sized like a phone) so text stays sharp.
 - Show the Kestra execution list before and after in shot 6 so the new revision and the single new execution are visible.
 - Do not show tokens, the `.env` file or the Kestra password. Blur the Telegram chat list.
-- Do not speed up the approval prompt; the pause on the prompt is the point.
+- Do not speed up shot 5; the moment where you read the diff and then send the command with its hash is the point.
 - A safety shot only if there is time left in the cut: run the same flow with the namespace removed from `namespaces`. Hermes says nothing is allowed and writes nothing. Not part of the 85 seconds.
 
 ## X post (279 characters, under 280)

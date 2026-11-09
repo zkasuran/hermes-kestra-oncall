@@ -10,22 +10,26 @@ Idempotent.
 
 from __future__ import annotations
 
-import os
+import json
 from pathlib import Path
 import subprocess
-import sys
 
-from common import HERMES, HOME
+from common import HOME
 
 PIN = 'aiohttp==3.14.5'  # same pin as the checkout's pyproject messaging extra
 
 
 def managed_python() -> Path | None:
-    os.environ['HERMES_HOME'] = str(HOME)
-    sys.path.insert(0, str(HERMES))
-    from pm.environments import committed_venv, venv_python
-    venv = committed_venv(HERMES)
-    return venv_python(venv) if venv else None
+    """The interpreter Hermes activates for this home, read from its recorded facts (no Hermes imports)."""
+    for facts in sorted((HOME / 'installs').glob('*/facts.json')):
+        try:
+            venv = json.loads(facts.read_text())['packages']['venv']['environment']
+        except (KeyError, ValueError, OSError):
+            continue
+        python = Path(venv) / 'bin/python'
+        if python.exists():
+            return python
+    return None
 
 
 def main() -> int:

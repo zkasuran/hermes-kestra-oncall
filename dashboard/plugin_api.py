@@ -11,8 +11,10 @@ thread so they never block the gateway event loop.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,7 @@ MAX_ROWS = 20
 MAX_DIFF_CHARS = 20000
 MAX_TEXT_CHARS = 2000
 MAX_LOG_LINES = 12
+CACHE_SECONDS = 5.0
 _INCIDENT_ID = re.compile(r"[A-Za-z0-9_.-]{1,160}\Z")
 
 
@@ -44,6 +47,9 @@ def _package() -> Any:
     if spec is None or spec.loader is None:
         raise RuntimeError("The kestra-oncall package next to dashboard/ could not be loaded.")
     module = importlib.util.module_from_spec(spec)
+    # The plugin's own sibling modules use relative imports (`from .client import ...`), which need the package to be
+    # findable by name while they load. This registers only this plugin's own package under a private name; it does not
+    # replace or wrap anything that belongs to Hermes.
     sys.modules[PACKAGE] = module
     try:
         spec.loader.exec_module(module)
@@ -93,45 +99,26 @@ def _text(value: Any, limit: int = MAX_TEXT_CHARS) -> str:
     return value[:limit] if isinstance(value, str) else ("" if value is None else str(value)[:limit])
 
 
-def _first(record: dict, *names: str) -> Any:
-    for name in names:
-        if record.get(name) not in (None, ""):
-            return record[name]
-    return None
-
-
-def _flow_parts(record: dict) -> tuple[str, str]:
-    namespace = _first(record, "namespace", "flow_namespace")
-    flow_id = _first(record, "flow_id", "flowId")
-    flow = record.get("flow")
-    if isinstance(flow, dict):
-        namespace = namespace or flow.get("namespace")
-        flow_id = flow_id or flow.get("id") or flow.get("flow_id")
-    elif isinstance(flow, str) and flow and not (namespace and flow_id):
-        namespace, _, flow_id = flow.rpartition(".")
-    return _text(namespace, 200), _text(flow_id, 200)
-
-
 def _proposal_view(proposal: Any) -> dict | None:
+    """Core's stored proposal: proposal_sha256, base_revision, diff, diff_stat, rationale (new_source is never forwarded)."""
     if not isinstance(proposal, dict) or not proposal.get("proposal_sha256"):
         return None
-    diff = _text(proposal.get("diff"), MAX_DIFF_CHARS)
+    diff = proposal["diff"] if isinstance(proposal.get("diff"), str) else ""
     return {
-        "sha256": _text(proposal["proposal_sha256"], 64),
-        "base_revision": proposal.get("base_revision"),
+        "sha256": proposal["proposal_sha256"],
+        "base_revision": proposal["base_revision"],
         "rationale": _text(proposal.get("rationale")),
-        "diff": diff,
-        "diff_truncated": isinstance(proposal.get("diff"), str) and len(proposal["diff"]) > MAX_DIFF_CHARS,
+        "diff": diff[:MAX_DIFF_CHARS],
+        "diff_truncated": len(diff) > MAX_DIFF_CHARS,
         "diff_stat": proposal.get("diff_stat"),
+        # The chat commands refuse a diff nobody can read in full (glue: hooks.diff_fits), so the tab says so too.
+        "fits_chat_approval": _sub("hooks").diff_fits(diff),
     }
 
 
 def _log_lines(record: dict) -> list[str]:
-    lines = []
-    for row in (record.get("error_logs") or record.get("logs") or [])[-MAX_LOG_LINES:]:
-        message = row.get("message") if isinstance(row, dict) else row
-        lines.append(_text(message, 400))
-    return lines
+    """Core stores logs as [{level, task_id, task_run_id, timestamp, message}]."""
+    return [_text(row.get("message"), 400) for row in (record.get("logs") or [])[-MAX_LOG_LINES:]]
 
 
 def _result_view(result: Any) -> dict | None:
@@ -143,68 +130,79 @@ def _result_view(result: Any) -> dict | None:
             "replay_execution_id": _text(result.get("replay_execution_id"), 160)}
 
 
+_APPLY_STATES = {"proposed", "applying"}
+
+
+def _apply_command(incident_id: str, proposal: dict) -> str:
+    """The typed command that approves exactly this proposal: incident id plus 12 characters of its SHA-256."""
+    return f"/kestra apply {incident_id} {proposal['sha256'][:12]}"
+
+
+def _can_apply(record: dict, proposal: dict | None) -> bool:
+    """Only show the chat command while an apply makes sense: a stored proposal that is waiting or was interrupted.
+
+    A verified or rolled-back incident has nothing left to apply, and a protected flow is never applied.
+    """
+    return bool(proposal and proposal["fits_chat_approval"] and not record["protected"] and record["status"] in _APPLY_STATES)
+
+
+def _apply_note(record: dict, proposal: dict | None) -> str:
+    if proposal and not proposal["fits_chat_approval"] and not record["protected"] and record["status"] in _APPLY_STATES:
+        return "The diff is too long to approve in chat (limit 120 lines and 3000 characters). Ask Hermes for a smaller fix."
+    return ""
+
+
 def _incident_view(record: dict, proposal: Any = None) -> dict:
-    namespace, flow_id = _flow_parts(record)
-    failed = record.get("failed_task")
-    failed_id = failed.get("id") or failed.get("task_id") if isinstance(failed, dict) else failed
-    incident_id = _first(record, "incident_id", "id")
+    """Core's public incident record (Oncall.get_incident). A renamed field raises KeyError, which a test catches."""
+    stored = _proposal_view(proposal if proposal is not None else record.get("proposal"))
+    incident_id = record["incident_id"]
     return {
-        "incident_id": _text(incident_id, 160),
-        "status": _text(record.get("status") or "open", 40),
-        "namespace": namespace,
-        "flow_id": flow_id,
-        "execution_id": _text(_first(record, "execution_id", "executionId"), 160),
-        "failed_task": _text(failed_id or _first(record, "failed_task_id"), 200),
-        "execution_revision": record.get("execution_revision") or record.get("revision"),
-        "protected": bool(record.get("protected")),
-        "created": _first(record, "created", "created_at", "opened_at"),
-        "updated": _first(record, "updated", "updated_at"),
+        "incident_id": incident_id,
+        "status": record["status"],
+        "namespace": record["namespace"],
+        "flow_id": record["flow_id"],
+        "execution_id": record["execution_id"],
+        "failed_task": _text(record.get("failed_task_id"), 200),
+        "execution_revision": record.get("execution_revision"),
+        "protected": bool(record["protected"]),
+        "created": record.get("created"),
+        "updated": record.get("updated"),
         "error_log": _log_lines(record),
         "result": _result_view(record.get("result")),
-        "proposal": _proposal_view(proposal if proposal is not None else record.get("proposal")),
-        "apply_command": f"/kestra apply {incident_id}" if incident_id and not record.get("protected") else "",
+        "proposal": stored,
+        "apply_command": _apply_command(incident_id, stored) if _can_apply(record, stored) else "",
+        "apply_note": _apply_note(record, stored),
     }
 
 
-def _declared_inputs(raw: Any) -> list[dict]:
-    """Declared onResume inputs arrive as a list of dicts or a mapping of name to type; show both."""
-    rows: list[dict] = []
-    if isinstance(raw, dict):
-        for name, spec in list(raw.items())[:30]:
-            kind = spec.get("type") if isinstance(spec, dict) else spec
-            rows.append({"name": _text(name, 120), "type": _text(kind, 40), "required": bool(isinstance(spec, dict) and spec.get("required"))})
-    elif isinstance(raw, list):
-        for spec in raw[:30]:
-            if isinstance(spec, dict):
-                rows.append({"name": _text(spec.get("id") or spec.get("name"), 120), "type": _text(spec.get("type"), 40),
-                             "required": bool(spec.get("required", True))})
-            elif isinstance(spec, str):
-                rows.append({"name": _text(spec, 120), "type": "", "required": True})
-    return rows
-
-
 def _pause_view(record: dict) -> dict:
-    namespace, flow_id = _flow_parts(record)
-    execution_id = _text(_first(record, "execution_id", "id"), 160)
-    inputs = _declared_inputs(_first(record, "declared_inputs", "resume_inputs", "on_resume", "inputs_declared"))
+    """Core's PauseDesk.list_pauses row. declared_inputs is [{id, type, required, defaults, description}]."""
+    execution_id = record["execution_id"]
+    inputs = [{"name": _text(row["id"], 120), "type": _text(row.get("type"), 40), "required": bool(row.get("required", True))}
+              for row in (record.get("declared_inputs") or [])[:30]]
     hint = " ".join(f"{row['name']}=<value>" for row in inputs)
+    task_run = record["paused_task_run_id"][:12]
     return {
         "execution_id": execution_id,
-        "namespace": namespace,
-        "flow_id": flow_id,
-        "paused_task_id": _text(_first(record, "paused_task_id", "task_id"), 200),
-        "paused_task_run_id": _text(_first(record, "paused_task_run_id", "task_run_id", "taskRunId"), 200),
-        "description": _text(_first(record, "description", "pause_description")),
-        "paused_for_seconds": _first(record, "paused_for_seconds", "paused_for"),
+        "namespace": record["namespace"],
+        "flow_id": record["flow_id"],
+        "paused_task_id": _text(record.get("paused_task_id"), 200),
+        "paused_task_run_id": _text(record["paused_task_run_id"], 200),
+        "description": _text(record.get("description")),
+        "paused_for_seconds": record.get("paused_for_seconds"),
         "resume_inputs": inputs,
         "protected": bool(record.get("protected")),
-        "resume_command": f"/kestra resume {execution_id} {hint}".strip(),
-        "kill_command": f"/kestra kill {execution_id}",
+        "ambiguous": bool(record.get("ambiguous")),
+        # Kestra resumes an execution as a whole, so with more than one PAUSED task run core refuses resume.
+        "resume_command": "" if record.get("ambiguous") else f"/kestra resume {execution_id} {task_run} {hint}".strip(),
+        "kill_command": f"/kestra kill {execution_id} {task_run}",
     }
 
 
 def _safe_error(exc: Exception, secrets: dict[str, str]) -> str:
     """Use the plugin's own redaction so transport bodies and credentials never reach the browser."""
+    if isinstance(exc, KeyError):
+        return f"A record from the plugin core had an unexpected shape (missing field {exc}). Update the plugin and reload the page."
     try:
         payload = _sub("settings").error_payload(exc, secrets)
         return f"{payload['error']} {payload['hint']}"[:600]
@@ -240,12 +238,9 @@ def build_overview() -> dict:
                 out["errors"]["kestra"] = _safe_error(exc, secrets)
             try:
                 for row in runtime.oncall.list_incidents(limit=MAX_ROWS):
-                    incident_id = _first(row, "incident_id", "id")
                     # The list rows are summaries; the full record carries logs, protection and the proposal.
-                    record = runtime.oncall.get_incident(incident_id) if incident_id else row
-                    proposal = record.get("proposal")
-                    if proposal is None and incident_id:
-                        proposal = runtime.store.get_proposal(incident_id)
+                    record = runtime.oncall.get_incident(row["incident_id"])
+                    proposal = record.get("proposal") or runtime.store.get_proposal(row["incident_id"])
                     out["incidents"].append(_incident_view(record, proposal))
             except Exception as exc:
                 out["errors"]["incidents"] = _safe_error(exc, secrets)
@@ -277,10 +272,36 @@ def _redacted(value: Any) -> Any:
         return value
 
 
+_cache_lock = threading.Lock()
+_cache: dict[str, Any] = {"key": None, "at": 0.0, "value": None}
+
+
+def _cache_key() -> str:
+    """One entry per Hermes home (profile) and settings, so a profile never sees another profile's incidents."""
+    try:
+        from hermes_constants import get_hermes_home
+
+        home = str(get_hermes_home())
+    except Exception:
+        home = ""
+    return home + "|" + json.dumps(_plugin_settings(), sort_keys=True, default=str)
+
+
+def cached_overview() -> dict:
+    """The tab polls every few seconds and each build reads Kestra, so reuse a fresh result for a short time."""
+    key = _cache_key()
+    with _cache_lock:
+        if _cache["key"] == key and time.monotonic() - _cache["at"] < CACHE_SECONDS:
+            return _cache["value"]
+        value = _redacted(build_overview())
+        _cache.update(key=key, at=time.monotonic(), value=value)
+        return value
+
+
 @router.get("/overview")
 def overview() -> dict:
     """Incidents, stored proposals and current pauses. Read-only."""
-    return _redacted(build_overview())
+    return cached_overview()
 
 
 @router.get("/incidents/{incident_id}")

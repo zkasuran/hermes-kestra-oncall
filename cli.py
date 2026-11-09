@@ -9,7 +9,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from .settings import PLUGIN, Settings, error_payload, redact
+from .settings import PLUGIN, Settings, approvals_bypassed, error_payload, redact
 
 ROUTE_KEY = "platforms.webhook.extra.routes.kestra-oncall"
 PROMPT = """A Kestra failure notification arrived. This is an unattended webhook run.
@@ -19,7 +19,8 @@ If the result has is_replay_of_incident, this failure is the replay of an existi
 Load kestra-oncall:kestra-oncall. Read logs and what changed, form one root-cause hypothesis
 and propose the smallest validated fix if policy permits. Never apply a fix, resume or kill
 an execution in this unattended run. Never use terminal or other tools to bypass approval.
-Reply with the incident id, root cause in one sentence, the stored diff and /kestra apply <id>.
+Reply with the incident id, root cause in one sentence, the stored diff, and the exact command
+/kestra apply <incident id> <first 12 characters of proposal_sha256>. The human types that command to approve.
 If no safe fix is justified, explain what evidence is missing and leave the incident for a human.
 """
 FORWARDER = """Kestra forwarder setup:
@@ -33,8 +34,12 @@ FORWARDER = """Kestra forwarder setup:
 5. Enable the webhook adapter with hermes gateway setup after the shared secret is set.
    Select a chat delivery target for phone replies; mirror_to_session only affects chat delivery.
 6. Use /kestra status, send one isolated failed execution and review /kestra incidents.
-   Approve once in the interactive chat. Never enable unattended approval overrides.
+   Review with /kestra show <id> and approve by typing the printed /kestra apply command. Never enable unattended approval overrides.
 """
+
+
+LOG_WARNING = ("WARNING: deliver is 'log', so the diagnosis and the /kestra apply command appear only in the gateway log, "
+               "not in a chat. Re-run with --deliver telegram --chat-id <id> (or discord, slack, signal, matrix) for phone replies.")
 
 
 def route_config(deliver: str = "log", chat_id: str = "") -> dict:
@@ -50,11 +55,12 @@ def route_config(deliver: str = "log", chat_id: str = "") -> dict:
 
 
 def setup_text(deliver: str = "log", chat_id: str = "") -> str:
+    warning = (LOG_WARNING + "\n") if deliver == "log" else ""
     out = io.StringIO()
     yaml = YAML()
     yaml.default_flow_style = False
     yaml.dump({"platforms": {"webhook": {"enabled": True, "extra": {"routes": {PLUGIN: route_config(deliver, chat_id)}}}}}, out)
-    return "# Route inherits the WEBHOOK_SECRET configured through Hermes.\n" + out.getvalue() + "\n" + FORWARDER
+    return warning + "# Route inherits the WEBHOOK_SECRET configured through Hermes.\n" + out.getvalue() + "\n" + FORWARDER
 
 
 def setup_parser(parser: argparse.ArgumentParser) -> None:
@@ -62,7 +68,8 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     subs.add_parser("doctor", help="Check Kestra connectivity, version, auth and namespace policy")
     setup = subs.add_parser("setup", help="Print the webhook route and Kestra forwarder instructions")
     setup.add_argument("--apply", action="store_true", help="Install only this route through Hermes config; never deploy a Kestra flow")
-    setup.add_argument("--deliver", choices=["log", "telegram", "discord", "slack", "signal", "matrix"], default="log")
+    setup.add_argument("--deliver", choices=["log", "telegram", "discord", "slack", "signal", "matrix"], default=None,
+                       help="Where replies go. Required with --apply; log means the gateway log only")
     setup.add_argument("--chat-id", default="", help="Optional delivery chat id; otherwise Hermes uses the platform home channel")
 
 
@@ -92,7 +99,8 @@ def doctor(toolbox: Any) -> dict:
         version = str(status.get("version", ""))
         checks = {"connectivity": status.get("connected") is True, "authentication_configured": auth,
                   "authentication_accepted": False, "allowed_namespaces": bool(settings.namespaces),
-                  "kestra_2": version.startswith("2.")}
+                  "kestra_2": version.startswith("2."),
+                  "approvals_not_bypassed": not approvals_bypassed()}
         if auth and checks["connectivity"] and settings.namespaces:
             try:
                 with toolbox.runtime_factory(toolbox.ctx, secrets) as runtime:
@@ -101,7 +109,7 @@ def doctor(toolbox: Any) -> dict:
             except Exception as exc:
                 status["authentication_error"] = error_payload(exc, secrets)
         return redact({"ok": all(checks.values()), "checks": checks, "status": status,
-                       "hint": "Kestra 2.0.9 is the tested API. Configure allowed namespaces and basic credentials or an API token."}, secrets)
+                       "hint": "Kestra 2.0.9 is the tested API. Configure allowed namespaces and basic credentials or an API token. If approvals_not_bypassed is false, turn off --yolo, /yolo or approvals.mode: off: the model-requested write tools refuse to run while it is on."}, secrets)
     except Exception as exc:
         return {"ok": False, **error_payload(exc, secrets)}
 
@@ -114,9 +122,13 @@ def run(args: argparse.Namespace, toolbox: Any) -> dict:
             print(json.dumps(result, indent=2, ensure_ascii=True))
             return result
         if args.kestra_command == "setup":
-            print(setup_text(args.deliver, args.chat_id))
+            deliver = args.deliver or "log"
+            if args.apply and args.deliver is None:
+                raise ValueError("Choose where replies go before installing: --deliver telegram --chat-id <id> "
+                                 "(or discord, slack, signal, matrix), or --deliver log to accept gateway-log-only replies.")
+            print(setup_text(deliver, args.chat_id))
             if args.apply:
-                result = install_route(route_config(args.deliver, args.chat_id))
+                result = install_route(route_config(deliver, args.chat_id))
                 print("Route installed. Set the shared secret and enable webhooks with hermes gateway setup.")
                 return result
             print("Preview only. Re-run with --apply to install this route.")

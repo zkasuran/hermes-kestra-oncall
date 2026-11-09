@@ -1,5 +1,5 @@
 id: healthy_report
-namespace: hko.demo
+namespace: demo
 description: Healthy control. Its success must never open an incident.
 tasks:
   - id: report

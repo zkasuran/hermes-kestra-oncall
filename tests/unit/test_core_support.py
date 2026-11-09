@@ -121,7 +121,7 @@ class FakeKestra:
             new_run["id"] = new_id()                 # Kestra remaps task run ids on replay
             mapping[run["id"]] = new_run["id"]
             if run["id"] == task_run_id:
-                final = "SUCCESS" if self.replay_state in {"SUCCESS", "WARNING"} else ("FAILED" if self.replay_state == "FAILED" else "RUNNING")
+                final = "SUCCESS" if self.replay_state in {"SUCCESS", "WARNING"} else ("FAILED" if self.replay_state == "FAILED" else "RUNNING")  # PAUSED/RUNNING never finish
                 new_run["attempts"].append(self._attempt("SUCCESS" if final == "SUCCESS" else "FAILED"))
                 new_run["state"]["current"] = final if final != "RUNNING" else "RUNNING"
                 failed_ids.add(new_run["id"])
@@ -132,7 +132,7 @@ class FakeKestra:
             runs = []
         if self.replay_state in {"SUCCESS", "WARNING"} and task_run_id:
             runs.append(self.task_run("after", "SUCCESS"))
-        state = self.replay_state if self.replay_state in {"SUCCESS", "WARNING", "FAILED", "KILLED", "RUNNING"} else "FAILED"
+        state = self.replay_state if self.replay_state in {"SUCCESS", "WARNING", "FAILED", "KILLED", "RUNNING", "PAUSED"} else "FAILED"
         execution = {"id": eid, "namespace": original["namespace"], "flowId": original["flowId"],
                      "flowRevision": revision if revision is not None else original["flowRevision"],
                      "taskRunList": runs, "inputs": original.get("inputs"),
@@ -144,6 +144,19 @@ class FakeKestra:
         self.logs[eid] = []
         self.outputs[eid] = {r["id"]: {"value": f"out-{r['taskId']}"} for r in runs if r["state"]["current"] == "SUCCESS"}
         return execution
+
+    def finish_replay(self, replay_id: str, state: str) -> None:
+        """Let a replay that was left RUNNING end later, as a slow real replay would."""
+        ex = self.executions[replay_id]
+        ex["state"]["current"] = state
+        for run in ex["taskRunList"]:
+            if run["state"]["current"] == "RUNNING":
+                run["state"]["current"] = "SUCCESS" if state == "SUCCESS" else "FAILED"
+                run["attempts"][-1]["state"]["current"] = run["state"]["current"]
+        if state == "SUCCESS":
+            ex["taskRunList"].append(self.task_run("after", "SUCCESS"))
+            self.outputs[replay_id] = {r["id"]: {"value": f"out-{r['taskId']}"} for r in ex["taskRunList"]
+                                       if r["state"]["current"] == "SUCCESS"}
 
     def validate(self, source: str) -> list[dict]:
         if "INVALID_TYPE" in source:
@@ -282,6 +295,9 @@ class FakeKestra:
                 continue
             if one("filters[flowId][EQUALS]") and ex["flowId"] != one("filters[flowId][EQUALS]"):
                 continue
+            prefix = one("filters[namespace][PREFIX]")
+            if prefix and not (ex["namespace"] == prefix or ex["namespace"].startswith(prefix + ".")):
+                continue
             states = one("filters[state][IN]")
             if states and ex["state"]["current"] not in states.split(","):
                 continue
@@ -293,8 +309,8 @@ class FakeKestra:
             if ok:
                 results.append({k: ex.get(k) for k in ("id", "namespace", "flowId", "flowRevision", "state", "labels", "originalId")})
         results.sort(key=lambda r: r["state"]["startDate"], reverse=True)
-        size = int(one("size") or 10)
-        return {"results": results[:size], "total": len(results)}
+        size, page = int(one("size") or 10), int(one("page") or 1)
+        return {"results": results[(page - 1) * size:page * size], "total": len(results)}
 
     def _resume(self, ex: dict, action: str, body: str) -> tuple[int, Any]:
         if ex["state"]["current"] != "PAUSED":

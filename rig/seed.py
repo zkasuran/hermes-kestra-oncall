@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import argparse
-from common import API, ROOT, RUN, save_json
+from common import API, ROOT, RUN, render_fixture, render_forwarder, save_json
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--enable-forwarder', action='store_true')
+    parser.add_argument('--no-forwarder-enable', action='store_true', help='deploy the rig forwarder disabled')
     args = parser.parse_args()
     api = API()
     records = []
-    for path in sorted((ROOT / 'kestra/demo').glob('*.yaml')) + sorted((ROOT / 'kestra/flows').glob('*.yaml')):
+    for path in (sorted((ROOT / 'kestra/demo').glob('*.yaml')) + sorted((ROOT / 'rig/flows').glob('*.yaml'))
+                 + sorted((ROOT / 'kestra/flows').glob('*.yaml'))):
         source = path.read_text()
-        if path.stem == 'hermes_oncall_forwarder' and args.enable_forwarder:
-            source = source.replace('disabled: true', 'disabled: false', 1)
+        if path.parent.name == 'demo':
+            source = render_fixture(source)
+        if path.stem == 'hermes_oncall_forwarder':
+            # The shipped file is a user template; the rig deploys a rendered copy (hko.* namespaces).
+            source = render_forwarder(source, disabled=args.no_forwarder_enable)
             RUN.mkdir(parents=True, exist_ok=True)
             (RUN / 'hermes_oncall_forwarder.yaml').write_text(source)
         result = api.deploy(source)

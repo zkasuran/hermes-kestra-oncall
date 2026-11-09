@@ -18,7 +18,8 @@ from ruamel.yaml import YAML
 from common import HOME, HERMES, PYTHON, ROOT, RUN, env_file
 
 OPENCODE = Path.home() / '.config/opencode/opencode.json'
-HOST, PORT = '10.250.90.1', 28644
+HOST = os.environ.get('HKO_WEBHOOK_HOST', '10.250.90.1')  # the docker network gateway: reachable from hko-kestra
+PORT = int(os.environ.get('HKO_WEBHOOK_PORT', '28644'))
 PROTECTED = ['hko.demo.protected_ledger']
 NAMESPACES = ['hko.demo', 'hko.e2e']
 
@@ -80,6 +81,9 @@ def write_config() -> None:
         'namespaces': NAMESPACES, 'protected_flows': PROTECTED,
         'rollback_on_failure': True, 'replay_timeout_seconds': 30, 'max_log_lines': 100}}
     webhook = config.setdefault('platforms', {}).setdefault('webhook', {})
+    # The rig owns this home: drop an older route so `setup --apply` installs the current one (it refuses to
+    # replace a route that differs, which is the right behaviour for a user's profile).
+    (webhook.get('extra') or {}).get('routes', {}).pop('kestra-oncall', None)
     webhook['enabled'] = True
     extra = webhook.setdefault('extra', {})
     extra['host'], extra['port'] = HOST, PORT
@@ -103,7 +107,7 @@ def main() -> int:
     enable = hermes('plugins', 'enable', 'kestra-oncall')
     print('plugin enable exit', enable.returncode)
     # The route comes from the plugin's own setup command so the rig exercises the shipped path.
-    setup = hermes('kestra-oncall', 'setup', '--apply')
+    setup = hermes('kestra-oncall', 'setup', '--apply', '--deliver', 'log')
     print('setup --apply exit', setup.returncode, setup.stdout[-200:].strip().replace('\n', ' | '))
     if setup.returncode:
         print(setup.stderr[-600:], file=sys.stderr)

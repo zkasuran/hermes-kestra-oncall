@@ -32,7 +32,7 @@ SCHEMAS = {
         "incident_id": INCIDENT, "new_source": {"type": "string", "minLength": 1, "maxLength": 524288, "description": "Complete revised flow YAML, same namespace and flow id. Keep the failed task id so replay can target it."},
         "rationale": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "One root-cause hypothesis supported by the incident logs and what-changed diff; explain the smallest fix."},
     }, ["incident_id", "new_source", "rationale"]),
-    "kestra_apply_fix": _schema("kestra_apply_fix", "WRITE, requires human approval in an interactive chat. Apply the exact stored proposal, replay from the failed task and verify recovery, with guarded rollback on failure. Stale proposals are refused. Never call from webhook, cron or other unattended runs. Repeating a verified proposal is a no-op.", {
+    "kestra_apply_fix": _schema("kestra_apply_fix", "WRITE, requires human approval in an interactive chat. Apply the exact stored proposal, replay from the failed task and verify recovery, with guarded rollback on failure. Stale proposals are refused. Never call from webhook, cron or other unattended runs. Repeating a verified proposal is a no-op. If the replay is still running when the wait ends the status is `pending`: the fix stays and nothing is rolled back; call again with the same hash later to keep following it.", {
         "incident_id": INCIDENT, "proposal_sha256": HASH,
     }, ["incident_id", "proposal_sha256"]),
     "kestra_pauses": _schema("kestra_pauses", "Read allowed PAUSED executions and save their approval snapshots. Returns execution id, paused_task_run_id, declared resume inputs and question. Call before kestra_pause_decide. No Kestra writes.", {}, []),
@@ -132,7 +132,36 @@ class Toolbox:
         actor += ":" + (context.get("HERMES_SESSION_ID") or context.get("HERMES_SESSION_CHAT_ID") or "interactive")
         if name == "kestra_apply_fix":
             checked_proposal(runtime, args)
+            self._require_ticket(runtime, name, args)
             return oncall.apply_fix(args["incident_id"], args["proposal_sha256"], actor=actor)
         snapshot = approvals.decision(args)
+        self._require_ticket(runtime, name, args)
         return runtime.pauses.decide(snapshot["execution_id"], snapshot["paused_task_run_id"],
                                      snapshot["action"], snapshot["inputs"], actor=actor)
+
+    @staticmethod
+    def _require_ticket(runtime: Any, name: str, args: dict) -> None:
+        """Write handlers run only after the approval step issued a one-shot ticket for these exact arguments."""
+        from .hooks import Tickets
+
+        if not Tickets(runtime.conn).consume(name, args):
+            raise ValueError("No approval was recorded for this exact call, so nothing was written. Writes go through "
+                             "Hermes's approval card (ask Hermes to apply) or the typed /kestra apply, resume or kill command.")
+
+    def authorize(self, name: str, args: dict, source: str = "command") -> str:
+        """Typed-command path: the human's own command is the approval. Builds the same stored view the approval
+        card shows, issues the one-shot ticket and returns that text. Raises ValueError when nothing safe can be
+        shown. Call only for a command a person typed."""
+        from .hooks import Tickets, build_request
+
+        secrets: Mapping[str, str] = {}
+        try:
+            secrets = self.secret_reader()
+            require_attended(self.context_reader())
+            clean = validate_args(name, args)
+            with self.runtime_factory(self.ctx, secrets) as runtime:
+                message, _ = build_request(runtime, name, clean, dict(secrets))
+                Tickets(runtime.conn).issue(name, clean, source)
+            return message
+        except Exception as exc:
+            raise ValueError(error_payload(exc, secrets)["error"]) from None

@@ -23,12 +23,12 @@ import os
 import sys
 import uuid
 
-HERMES = '/home/asuran/hko-rig/hermes-agent'
+HERMES = os.environ.get('HKO_HERMES_DIR', '/home/asuran/hko-rig/hermes-agent')
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument('--platform', default='cli', choices=['cli', 'webhook', 'cron'])
+    parser.add_argument('--platform', default='cli', choices=['cli', 'webhook', 'cron', 'telegram'])
     parser.add_argument('--answer', default='once', choices=['once', 'deny'])
     parser.add_argument('--fault', default='', choices=['', 'crash-before-replay'])
     sub = parser.add_subparsers(dest='mode', required=True)
@@ -43,15 +43,23 @@ def main() -> int:
     os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
     sys.path.insert(0, HERMES)
     # Hermes boot order: activate the managed dependency environment, then load .env, then plugins.
-    from pm.environments import activate_dependencies
     from pathlib import Path
-    activate_dependencies(Path(HERMES))
+    try:  # newer Hermes keeps plugin dependencies in a managed environment; v0.23.0 has none
+        from pm.environments import activate_dependencies
+        activate_dependencies(Path(HERMES))
+    except ImportError:
+        pass
     from hermes_cli.env_loader import load_hermes_dotenv
     load_hermes_dotenv()
 
     session_id = 'e2e-' + uuid.uuid4().hex[:8]
     if args.platform == 'cli':
         os.environ.update(HERMES_INTERACTIVE='1', HERMES_SESSION_PLATFORM='cli', HERMES_SESSION_ID=session_id)
+    elif args.platform == 'telegram':
+        # A chat platform: a plugin slash command runs outside an agent turn, no approval notifier is
+        # registered, and the gateway exports HERMES_EXEC_ASK. No approval callback is installed below.
+        os.environ.update(HERMES_SESSION_PLATFORM='telegram', HERMES_SESSION_ID=session_id, HERMES_EXEC_ASK='1')
+        os.environ.pop('HERMES_INTERACTIVE', None)
     elif args.platform == 'webhook':
         os.environ.update(HERMES_SESSION_PLATFORM='webhook', HERMES_SESSION_ID=session_id)
         os.environ.pop('HERMES_INTERACTIVE', None)
@@ -66,8 +74,9 @@ def main() -> int:
         prompts.append({'label': command_label, 'description': description})
         return args.answer
 
-    from tools.terminal_tool import set_approval_callback
-    set_approval_callback(human)
+    if args.platform != 'telegram':
+        from tools.terminal_tool import set_approval_callback
+        set_approval_callback(human)
 
     from hermes_cli.plugins import discover_plugins, get_plugin_command_handler
     discover_plugins(force=True)

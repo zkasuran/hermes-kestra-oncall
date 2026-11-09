@@ -21,9 +21,15 @@ def main() -> None:
                 continue
             api.request('DELETE', api.prefix + '/executions/' + row['id'])
             deleted['executions'] += 1
+    for fid in ('hermes_oncall_forwarder', 'secret_probe', 'rig_selffail', 'rig_selfguard_fwd'):
+        query = urllib.parse.urlencode({'namespace': 'hko.system', 'flowId': fid, 'size': 1000})
+        for row in api.request('GET', api.prefix + '/executions/search?' + query)['results']:
+            if row['namespace'] == 'hko.system' and row['flowId'] == fid:
+                api.request('DELETE', api.prefix + '/executions/' + row['id'])
+                deleted['executions'] += 1
     for namespace in FLOW_NAMESPACES:
         for flow in api.request('GET', api.prefix + f'/flows/{namespace}'):
-            if namespace == 'hko.system' and flow['id'] not in ('hermes_oncall_forwarder', 'secret_probe'):
+            if namespace == 'hko.system' and flow['id'] not in ('hermes_oncall_forwarder', 'secret_probe', 'rig_selffail', 'rig_selfguard_fwd'):
                 continue
             api.request('DELETE', api.prefix + f'/flows/{namespace}/{flow["id"]}')
             deleted['flows'] += 1

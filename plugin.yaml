@@ -10,7 +10,7 @@ description: >-
   resumes/kills paused executions only through approval-gated tools. Failed replays may
   restore the base flow revision. No telemetry. AI-assisted implementation.
 python_dependencies:
-  - ruamel.yaml==0.18.16
+  - ruamel.yaml>=0.18.16,<0.19
 provides_tools:
   - kestra_status
   - kestra_incident_open
@@ -52,6 +52,10 @@ config_schema:
     type: int
     default: 200
     description: Maximum error log lines per incident, from 1 to 200.
+  allow_insecure_http:
+    type: bool
+    default: false
+    description: Permit plain HTTP to a private-network Kestra host such as http://kestra:8080. Basic auth is then sent in clear text. Loopback needs no setting.
   username:
     type: secret
     env: KESTRA_USERNAME

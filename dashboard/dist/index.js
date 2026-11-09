@@ -47,7 +47,7 @@
 
   function statusTone(status) {
     if (status === "verified") return "good";
-    if (status === "rolled_back" || status === "stale" || status === "conflict" || status === "needs_human") return "warn";
+    if (status === "rolled_back" || status === "pending" || status === "stale" || status === "conflict" || status === "needs_human") return "warn";
     if (status === "proposed") return "info";
     return "muted";
   }
@@ -86,8 +86,10 @@
               h(Diff, { text: proposal.diff }),
               proposal.diff_truncated ? h("p", { className: "ko-note" }, "Diff shortened here. The chat approval shows the full stored diff.") : null,
               h("div", { className: "ko-hash" }, "SHA-256 ", h("code", null, proposal.sha256)),
-              inc.protected ? null : h(Command, { text: inc.apply_command }),
-              h("p", { className: "ko-note" }, "Approve in the Hermes chat. This page cannot write to Kestra."))
+              inc.apply_command ? h(Command, { text: inc.apply_command }) : null,
+              h("p", { className: "ko-note" }, inc.apply_command
+                ? "Type this command in the Hermes chat to approve exactly this diff. This page cannot write to Kestra."
+                : (inc.apply_note || "No approval is pending for this incident.")))
           : h("p", { className: "ko-note" }, inc.protected
               ? "Protected flow: Hermes diagnoses it but never proposes or writes a fix."
               : "No proposal yet. Ask Hermes to inspect this incident and propose a fix.")));
@@ -116,9 +118,11 @@
                   row.required ? badge("required", "info") : null);
               }))
           : null,
-        h(Command, { text: p.resume_command }),
+        p.ambiguous
+          ? h("p", { className: "ko-note" }, "More than one task run in this execution is paused. Kestra resumes an execution as a whole, so resume is refused here. Killing ends the whole execution.")
+          : h(Command, { text: p.resume_command }),
         h(Command, { text: p.kill_command }),
-        h("p", { className: "ko-note" }, "Answer in the Hermes chat. Killing ends the execution.")));
+        h("p", { className: "ko-note" }, "Type the command in the Hermes chat. Killing ends the execution.")));
   }
 
   function Section(props) {

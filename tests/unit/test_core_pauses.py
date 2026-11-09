@@ -195,3 +195,45 @@ def test_pause_rows_and_decisions_are_strictly_json_serialisable_and_carry_the_g
     json.dumps(rows, allow_nan=False)
     assert {"execution_id", "paused_task_run_id", "paused_task_id", "namespace", "flow_id", "description"} <= set(rows[0])
     json.dumps(w.desk.decide(ex["id"], ex["taskRunList"][1]["id"], "resume", {"approved": "true"}, actor="t"), allow_nan=False)
+
+
+def add_two_pauses(fake):
+    fake.put_flow("hko.demo", "parallel", PAUSE_SOURCE.replace("id: refunds", "id: parallel"))
+    ex = fake.add_execution("hko.demo", "parallel", 1, [("approve_a", "PAUSED"), ("approve_b", "PAUSED")], state="PAUSED")
+    return ex
+
+
+def test_C5_two_paused_task_runs_are_flagged_and_resume_is_refused(w):
+    ex = add_two_pauses(w.fake)
+    rows = [r for r in w.desk.list_pauses() if r["execution_id"] == ex["id"]]
+    assert len(rows) == 2 and all(r["ambiguous"] and r["paused_task_run_count"] == 2 for r in rows)
+    with pytest.raises(PolicyError, match="2 paused task runs.*Kestra UI"):
+        w.desk.decide(ex["id"], rows[0]["paused_task_run_id"], "resume", None, actor="t")
+    assert pause_writes(w.fake) == 0 and w.store.pause_get(ex["id"], rows[0]["paused_task_run_id"]) is None
+    killed = w.desk.decide(ex["id"], rows[0]["paused_task_run_id"], "kill", None, actor="t")
+    assert killed["status"] == "killed" and "whole execution" in killed["message"]
+
+
+def test_C5_a_single_pause_is_not_ambiguous(w):
+    add_pause(w.fake)
+    (row,) = w.desk.list_pauses()
+    assert row["ambiguous"] is False and row["paused_task_run_count"] == 1
+
+
+def test_C10_pauses_elsewhere_cannot_push_allowed_ones_off_the_first_page(w):
+    for n in range(120):
+        w.fake.add_execution("hko.elsewhere", f"noise{n}", 1, [("approve", "PAUSED")], state="PAUSED")
+    mine = add_pause(w.fake)                                      # the oldest of all 121 paused executions
+    rows = w.desk.list_pauses()
+    assert [r["execution_id"] for r in rows] == [mine["id"]] and w.desk.last_truncated is False
+
+
+def test_C10_paging_reaches_every_allowed_pause_and_reports_truncation(w, monkeypatch):
+    import kestra_oncall.pauses as pauses
+    for n in range(5):
+        add_pause(w.fake, flow_id=f"mine{n}")
+    monkeypatch.setattr(pauses, "PAUSE_PAGE_SIZE", 2)
+    monkeypatch.setattr(pauses, "MAX_PAUSE_PAGES", 3)
+    assert len(w.desk.list_pauses()) == 5 and w.desk.last_truncated is False
+    monkeypatch.setattr(pauses, "MAX_PAUSE_PAGES", 2)
+    assert len(w.desk.list_pauses()) == 4 and w.desk.last_truncated is True

@@ -3,7 +3,7 @@
 It loads kestra-oncall through Hermes's real plugin loader, then calls the tools through the real
 `model_tools.handle_function_call` (pre_tool_call hook, Hermes approval gate, registry dispatch) and the
 real /kestra slash command against a live Kestra. Only the human's answer in the approval prompt is
-replaced: the first prompt is denied, later ones are approved. Prints one JSON document on the last line.
+replaced: the first prompt is denied, later ones are approved (three tool prompts; typed /kestra commands raise no prompt). Prints one JSON document on the last line.
 """
 
 from __future__ import annotations
@@ -62,4 +62,6 @@ command = manager._plugin_commands["kestra"]["handler"]
 out["cmd_status"] = command("status")
 out["cmd_incidents"] = command("incidents")
 out["cmd_show"] = command("show " + incident_id)
+out["cmd_apply_wrong"] = command(f"apply {incident_id} {'0' * 12}")             # typed with a wrong hash: refused
+out["cmd_apply"] = command(f"apply {incident_id} {sha[:12]}")                    # typed approval, no card; core no-op
 print("RESULT " + json.dumps(out))

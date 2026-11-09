@@ -170,9 +170,10 @@ def test_open_incident_reads_the_real_failure(world):
     assert b["flow"]["execution_revision"] == 2 and "outputs.nosuch" in b["flow"]["source"]
     assert b["what_changed"]["last_success_revision"] == 1 and "outputs.nosuch" in b["what_changed"]["diff"]
     assert world.oncall.open_incident(world.exec_id)["newly_opened"] is False
-    other = Oncall(world.client, Store(":memory:"), Policy(namespaces=["hko.demo"]))
-    with pytest.raises(PolicyError):
-        other.open_incident(world.exec_id)
+    with Store(":memory:") as other_store:
+        other = Oncall(world.client, other_store, Policy(namespaces=["hko.demo"]))
+        with pytest.raises(PolicyError):
+            other.open_incident(world.exec_id)
     with pytest.raises(PolicyError, match="not FAILED"):
         world.oncall.open_incident(world.ok["id"])
 
@@ -341,3 +342,192 @@ def test_pause_stale_guard_when_resumed_elsewhere_and_empty_inputs_and_kill(paus
     killed = w.desk.decide(doomed["id"], run3["id"], "kill", None, actor="live")
     assert killed["status"] == "killed" and killed["new_state"] == "KILLED"
     assert w.client.get_execution(doomed["id"])["state"]["current"] == "KILLED"
+
+
+def slow_source(flow_id: str, message: str) -> str:
+    return flow_source(flow_id, message).replace(
+        "  - id: three\n    type: io.kestra.plugin.core.log.Log\n    message: done\n",
+        "  - id: three\n    type: io.kestra.plugin.core.flow.Sleep\n    duration: PT10S\n")
+
+
+def test_slow_replay_is_pending_then_verified_without_rollback_or_second_replay(client, cleanup, tmp_path):
+    """The replay's last task sleeps 10 s, longer than replay_timeout_s=2: apply must keep the fix and say 'pending'."""
+    flow_id = "live_slow_" + uuid.uuid4().hex[:8]
+    cleanup.append(flow_id)
+    client.create_flow(slow_source(flow_id, GOOD))
+    client.update_flow(NS, flow_id, slow_source(flow_id, BAD))
+    failed = client.trigger(NS, flow_id, wait=True)
+    assert failed["state"]["current"] == "FAILED" and failed["flowRevision"] == 2
+    with Store(tmp_path / "slow.db") as store:
+        quick = Oncall(client, store, Policy(namespaces=[NS], replay_timeout_s=2))
+        patient = Oncall(client, store, Policy(namespaces=[NS], replay_timeout_s=90))
+        incident = quick.open_incident(failed["id"])
+        proposal = quick.propose_fix(incident["incident_id"], slow_source(flow_id, GOOD), "fix the output reference")
+        pending = quick.apply_fix(incident["incident_id"], proposal["proposal_sha256"], actor="live-test")
+        assert pending["status"] == "pending" and pending["noop"] is False, pending
+        assert "nothing was rolled back" in pending["message"]
+        flow = client.get_flow(NS, flow_id)
+        assert flow["revision"] == 3 and flow["source"] == slow_source(flow_id, GOOD)         # fix still live
+        replay = client.get_execution(pending["replay_execution_id"])
+        assert replay["state"]["current"] in {"RUNNING", "CREATED", "SUBMITTED", "RESTARTED"}  # genuinely still going
+        assert quick.get_incident(incident["incident_id"])["status"] == "applying"
+
+        done = patient.apply_fix(incident["incident_id"], proposal["proposal_sha256"], actor="live-test")
+        assert done["status"] == "verified", done
+        assert done["replay_execution_id"] == pending["replay_execution_id"]
+        assert client.get_execution(done["replay_execution_id"])["state"]["current"] == "SUCCESS"
+        assert [r["revision"] for r in client.list_revisions(NS, flow_id)] == [1, 2, 3]       # no rollback revision
+        rows = client.search_executions(labels={"system.correlationId": failed["id"]}, size=50)
+        assert len([r for r in rows if r["id"] != failed["id"]]) == 1                          # one replay only
+
+
+# ------------------------------------------------------------------------------------------- pass 3: nesting shapes (FACTS section 8)
+def make_flow(client, cleanup, source: str, flow_id: str) -> str:
+    cleanup.append(flow_id)
+    client.create_flow(source.replace("FID", flow_id))
+    return flow_id
+
+
+def test_parallel_branch_failure_is_replayed_from_the_failed_branch_and_verified(client, cleanup, tmp_path):
+    flow_id = "live_par_" + uuid.uuid4().hex[:8]
+    source = """id: FID
+namespace: hko.coretest
+tasks:
+  - id: first
+    type: io.kestra.plugin.core.debug.Return
+    format: "{{ now() }}"
+  - id: par
+    type: io.kestra.plugin.core.flow.Parallel
+    tasks:
+      - id: ok_branch
+        type: io.kestra.plugin.core.debug.Return
+        format: "{{ now() }}"
+      - id: bad_branch
+        type: io.kestra.plugin.core.log.Log
+        message: "{{ outputs.nosuch.value }}"
+  - id: last
+    type: io.kestra.plugin.core.log.Log
+    message: last
+"""
+    make_flow(client, cleanup, source, flow_id)
+    failed = client.trigger(NS, flow_id, wait=True)
+    assert failed["state"]["current"] == "FAILED"
+    with Store(tmp_path / "par.db") as store:
+        oncall = Oncall(client, store, Policy(namespaces=[NS], replay_timeout_s=60))
+        incident = oncall.open_incident(failed["id"])
+        assert incident["failed_task_id"] == "bad_branch" and "diagnose_only_reason" not in incident   # leaf, not the Parallel parent
+        proposal = oncall.propose_fix(incident["incident_id"], source.replace("FID", flow_id).replace("outputs.nosuch.value", "outputs.first.value"), "r")
+        result = oncall.apply_fix(incident["incident_id"], proposal["proposal_sha256"], actor="live-test")
+        assert result["status"] == "verified", result
+        assert result["verification"]["reused_task_ids"] == ["first", "ok_branch"] and result["verification"]["rerun_task_ids"] == []
+        replay = task_runs(client.get_execution(result["replay_execution_id"]))
+        assert [a["state"]["current"] for a in replay["bad_branch"]["attempts"]] == ["FAILED", "SUCCESS"]
+
+
+def test_failed_loop_is_diagnose_only_and_kestra_really_cannot_replay_it(client, cleanup, tmp_path):
+    flow_id = "live_loop_" + uuid.uuid4().hex[:8]
+    source = """id: FID
+namespace: hko.coretest
+tasks:
+  - id: each
+    type: io.kestra.plugin.core.flow.Loop
+    values: ["a", "b"]
+    concurrencyLimit: 1
+    tasks:
+      - id: item_task
+        type: io.kestra.plugin.core.log.Log
+        message: "{{ item.value == 'b' ? outputs.nosuch.value : item.value }}"
+"""
+    make_flow(client, cleanup, source, flow_id)
+    failed = client.trigger(NS, flow_id, wait=True)
+    assert failed["state"]["current"] == "FAILED"
+    with Store(tmp_path / "loop.db") as store:
+        oncall = Oncall(client, store, Policy(namespaces=[NS], replay_timeout_s=60))
+        incident = oncall.open_incident(failed["id"])
+        (child,) = incident["child_executions"]
+        assert child["flow_id"] == flow_id and child["state"] == "FAILED" and any("nosuch" in e for e in child["errors"])
+        assert "cannot replay a failed Loop" in incident["diagnose_only_reason"]
+        with pytest.raises(PolicyError, match="cannot replay a failed Loop"):
+            oncall.propose_fix(incident["incident_id"], source.replace("FID", flow_id).replace("outputs.nosuch.value", "item.value"), "r")
+    # the reason the plugin refuses: Kestra itself cannot replay it (a fix could never be verified)
+    client.update_flow(NS, flow_id, source.replace("FID", flow_id).replace("outputs.nosuch.value", "item.value"))
+    replay = client.replay(failed["id"], task_run_id=task_runs(failed)["each"]["id"], revision=2)
+    final = client.wait_terminal(replay["id"], timeout=60)
+    assert final["state"]["current"] == "FAILED"
+    for _ in range(20):          # Kestra writes the log line a moment after the execution turns FAILED
+        if any("No restartable loop sub-execution" in r["message"] for r in client.get_logs(final["id"], min_level="ERROR")):
+            break
+        time.sleep(0.5)
+    else:
+        pytest.fail("expected the 'No restartable loop sub-execution' error log")
+
+
+def test_failed_subflow_points_at_the_child_execution_and_is_diagnose_only(client, cleanup, tmp_path):
+    child_id, parent_id = "live_child_" + uuid.uuid4().hex[:8], "live_parent_" + uuid.uuid4().hex[:8]
+    make_flow(client, cleanup, """id: FID
+namespace: hko.coretest
+tasks:
+  - id: child_task
+    type: io.kestra.plugin.core.log.Log
+    message: "{{ outputs.nosuch.value }}"
+""", child_id)
+    parent_source = f"""id: FID
+namespace: hko.coretest
+tasks:
+  - id: first
+    type: io.kestra.plugin.core.debug.Return
+    format: x
+  - id: sub
+    type: io.kestra.plugin.core.flow.Subflow
+    namespace: hko.coretest
+    flowId: {child_id}
+    wait: true
+    transmitFailed: true
+"""
+    make_flow(client, cleanup, parent_source, parent_id)
+    failed = client.trigger(NS, parent_id, wait=True)
+    assert failed["state"]["current"] == "FAILED"
+    with Store(tmp_path / "sub.db") as store:
+        oncall = Oncall(client, store, Policy(namespaces=[NS], replay_timeout_s=60))
+        incident = oncall.open_incident(failed["id"])
+        assert incident["failed_task_id"] == "sub"
+        (child,) = incident["child_executions"]
+        assert child["flow_id"] == child_id and child["state"] == "FAILED" and any("nosuch" in e for e in child["errors"])
+        with pytest.raises(PolicyError, match="Open an incident on the child execution"):
+            oncall.propose_fix(incident["incident_id"], parent_source.replace("FID", parent_id) + "# x\n", "r")
+        child_incident = oncall.open_incident(child["execution_id"])                                 # the right place to fix it
+        assert child_incident["flow_id"] == child_id and child_incident["failed_task_id"] == "child_task"
+        proposal = oncall.propose_fix(child_incident["incident_id"], client.get_flow(NS, child_id)["source"].replace('"{{ outputs.nosuch.value }}"', "ok"), "r")
+        assert oncall.apply_fix(child_incident["incident_id"], proposal["proposal_sha256"], actor="live-test")["status"] == "verified"
+
+
+def test_replay_that_reaches_a_pause_is_pending_with_a_pause_message_then_verified(client, cleanup, tmp_path):
+    flow_id = "live_replay_pause_" + uuid.uuid4().hex[:8]
+    source = """id: FID
+namespace: hko.coretest
+tasks:
+  - id: one
+    type: io.kestra.plugin.core.debug.Return
+    format: "{{ now() }}"
+  - id: two
+    type: io.kestra.plugin.core.log.Log
+    message: "{{ outputs.nosuch.value }}"
+  - id: gate
+    type: io.kestra.plugin.core.flow.Pause
+    description: "Looks right?"
+"""
+    make_flow(client, cleanup, source, flow_id)
+    failed = client.trigger(NS, flow_id, wait=True)
+    assert failed["state"]["current"] == "FAILED"
+    with Store(tmp_path / "rp.db") as store:
+        oncall = Oncall(client, store, Policy(namespaces=[NS], replay_timeout_s=60))
+        incident = oncall.open_incident(failed["id"])
+        proposal = oncall.propose_fix(incident["incident_id"], source.replace("FID", flow_id).replace("outputs.nosuch.value", "outputs.one.value"), "r")
+        pending = oncall.apply_fix(incident["incident_id"], proposal["proposal_sha256"], actor="live-test")
+        assert pending["status"] == "pending" and pending["replay_state"] == "PAUSED" and "waiting on a Pause task" in pending["message"], pending
+        assert client.get_flow(NS, flow_id)["revision"] == 2                                          # fix kept, nothing rolled back
+        replay = client.get_execution(pending["replay_execution_id"])
+        client.resume(replay["id"], None)
+        done = oncall.apply_fix(incident["incident_id"], proposal["proposal_sha256"], actor="live-test")
+        assert done["status"] == "verified", done
+        assert done["replay_execution_id"] == pending["replay_execution_id"] and done["verification"]["reused_task_ids"] == ["one"]

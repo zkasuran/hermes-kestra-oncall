@@ -373,13 +373,41 @@ def test_rollback_disabled_leaves_the_fix_and_asks_a_human(tmp_path, fake):
     assert fake.current(NS, FLOW)["source"] == FIXED_SOURCE and writes(fake) == (1, 1)
 
 
-def test_replay_timeout_rolls_back_and_says_the_replay_may_still_run(tmp_path, fake):
+def test_slow_replay_is_pending_not_rolled_back_and_a_later_success_is_verified(tmp_path, fake):
     w = make_world(tmp_path, fake, timeout=1)
     incident_id, p = proposed(w)
     fake.replay_state = "RUNNING"
     r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
-    assert r["status"] == "rolled_back" and r["replay_state"] == "TIMEOUT" and "may still be running" in r["note"]
+    assert r["status"] == "pending" and r["noop"] is False and r["replay_state"] == "RUNNING"
+    assert "run apply again" in r["message"].lower() and "nothing was rolled back" in r["message"]
+    assert fake.current(NS, FLOW)["source"] == FIXED_SOURCE and fake.current(NS, FLOW)["revision"] == 3   # no rollback
+    assert writes(fake) == (1, 1)
+    assert w.oncall.get_incident(incident_id)["status"] == "applying"
+    assert w.oncall.get_incident(incident_id)["apply_state"]["step"] == "replayed" and w.store.lock_info(incident_id) is None
+    with pytest.raises(PolicyError, match="apply is in progress"):          # still owned by the pending apply
+        w.oncall.propose_fix(incident_id, FIXED_SOURCE + "# other\n", "r")
+    again = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")   # still running: still pending, still no writes
+    assert again["status"] == "pending" and writes(fake) == (1, 1)
+    fake.finish_replay(r["replay_execution_id"], "SUCCESS")                    # the replay finally completes
+    done = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert done["status"] == "verified" and done["verification"]["ok"] and done["replay_execution_id"] == r["replay_execution_id"]
+    assert writes(fake) == (1, 1) and len(fake.replays_of(w.exec_id)) == 1      # no second write, no second replay
+    assert fake.current(NS, FLOW)["source"] == FIXED_SOURCE
+    steps = [e["step"] for e in w.store.journal(incident_id)]
+    assert steps.count("replay_pending") == 2 and "rolled_back" not in steps and steps[-1] == "verified"
+
+
+def test_slow_replay_that_later_fails_is_rolled_back_on_the_next_apply(tmp_path, fake):
+    w = make_world(tmp_path, fake, timeout=1)
+    incident_id, p = proposed(w)
+    fake.replay_state = "RUNNING"
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "pending" and fake.current(NS, FLOW)["revision"] == 3
+    fake.finish_replay(r["replay_execution_id"], "FAILED")
+    done = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert done["status"] == "rolled_back" and done["replay_state"] == "FAILED" and done["rollback_revision"] == 4
     assert fake.current(NS, FLOW)["source"] == BASE_SOURCE
+    assert writes(fake) == (2, 1) and len(fake.replays_of(w.exec_id)) == 1
 
 
 def test_rollback_write_that_fails_is_reported_not_hidden(w, monkeypatch):
@@ -458,3 +486,308 @@ def test_failed_replay_started_by_us_does_not_open_a_second_incident(w):
     stranger = w.fake.add_execution(NS, FLOW, 2, [("extract", "SUCCESS"), ("transform", "FAILED")])
     stranger["originalId"] = w.exec_id                                  # a replay somebody else started
     assert w.oncall.open_incident(stranger["id"])["incident_id"] != incident_id
+
+
+# ====================================================================================== pass 3: review fixes
+def refuse_replay(w, monkeypatch, status, *, after=False):
+    real = w.client.replay
+
+    def replay(*a, **k):
+        if after:
+            real(*a, **k)                                    # the request reached Kestra, the answer was lost
+        raise KestraError(f"Kestra POST replay failed with HTTP {status}", status=status, body="refused by test")
+    monkeypatch.setattr(w.client, "replay", replay)
+
+
+def test_C1_refused_replay_rolls_the_fix_back_and_the_human_can_propose_again(w, monkeypatch):
+    incident_id, p = proposed(w)
+    refuse_replay(w, monkeypatch, 409)
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "rolled_back" and "refused the replay request (HTTP 409" in r["message"]
+    assert r["replay_execution_id"] is None and r["rollback_revision"] == 4
+    assert w.fake.current(NS, FLOW)["source"] == BASE_SOURCE and writes(w.fake) == (2, 0)
+    assert w.oncall.get_incident(incident_id)["status"] == "rolled_back"
+    p2 = w.oncall.propose_fix(incident_id, FIXED_SOURCE + "# second try\n", "r")
+    assert p2["base_revision"] == 4
+    with pytest.raises(StaleError):                                            # the old approval is dead, not stuck
+        w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    monkeypatch.undo()
+    assert w.oncall.apply_fix(incident_id, p2["proposal_sha256"], actor="t")["status"] == "verified"
+    steps = [e["step"] for e in w.store.journal(incident_id)]
+    assert "replay_refused" in steps
+
+
+def test_C1_refused_replay_without_rollback_asks_a_human(tmp_path, fake, monkeypatch):
+    w = make_world(tmp_path, fake, rollback=False)
+    incident_id, p = proposed(w)
+    refuse_replay(w, monkeypatch, 404)
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "needs_human" and "rollback_on_failure is off" in r["message"]
+    assert fake.current(NS, FLOW)["source"] == FIXED_SOURCE
+    assert w.oncall.get_incident(incident_id)["status"] == "needs_human"
+
+
+def test_C1_unclear_replay_failure_is_pending_and_retry_makes_exactly_one_replay(w, monkeypatch):
+    incident_id, p = proposed(w)
+    refuse_replay(w, monkeypatch, 503)                       # never reached Kestra
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "pending" and "may or may not have started" in r["message"] and r["noop"] is False
+    assert w.fake.current(NS, FLOW)["source"] == FIXED_SOURCE and writes(w.fake) == (1, 0)
+    monkeypatch.undo()
+    done = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert done["status"] == "verified" and writes(w.fake) == (1, 1) and len(w.fake.replays_of(w.exec_id)) == 1
+
+
+def test_C1_unclear_failure_after_kestra_started_the_replay_is_adopted_on_retry(w, monkeypatch):
+    incident_id, p = proposed(w)
+    refuse_replay(w, monkeypatch, 503, after=True)          # Kestra started the replay, the response was lost
+    assert w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")["status"] == "pending"
+    monkeypatch.undo()
+    done = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert done["status"] == "verified" and done["adopted_existing_replay"] is True
+    assert len(w.fake.replays_of(w.exec_id)) == 1
+
+
+def test_C1_an_interrupted_apply_that_never_replayed_does_not_block_a_new_proposal(w, monkeypatch):
+    incident_id, p = proposed(w)
+    refuse_replay(w, monkeypatch, 503)
+    w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert w.oncall.get_incident(incident_id)["status"] == "applying"
+    p2 = w.oncall.propose_fix(incident_id, FIXED_SOURCE.replace("upper", "lower"), "different idea")
+    assert p2["base_revision"] == 3 and w.oncall.get_incident(incident_id)["status"] == "proposed"
+    # while an apply really runs (lock held, or a replay is in flight) proposing stays refused
+    w.store.update_incident(incident_id, status="applying", apply_state={"step": "written", "proposal_sha256": "x"})
+    assert w.store.lock(incident_id, "running-apply", 60)
+    with pytest.raises(PolicyError, match="apply is in progress"):
+        w.oncall.propose_fix(incident_id, FIXED_SOURCE + "# z\n", "r")
+    w.store.unlock(incident_id, "running-apply")
+    w.store.update_incident(incident_id, apply_state={"step": "replayed", "replay_execution_id": "r1", "proposal_sha256": "x"})
+    with pytest.raises(PolicyError, match="apply is in progress"):
+        w.oncall.propose_fix(incident_id, FIXED_SOURCE + "# z\n", "r")
+
+
+def test_C2_failed_execution_without_a_failed_task_run_is_diagnose_only(w):
+    ex = w.fake.add_execution(NS, FLOW, 2, [("extract", "SUCCESS"), ("transform", "SUCCESS")], state="FAILED")
+    incident = w.oncall.open_incident(ex["id"])
+    assert incident["failed_task_id"] is None and "nothing to replay from" in incident["diagnose_only_reason"]
+    with pytest.raises(PolicyError, match="nothing to replay from"):
+        w.oncall.propose_fix(incident["incident_id"], FIXED_SOURCE, "r")
+    w.store.save_proposal(incident["incident_id"], proposal_sha256="h", base_revision=2, base_source_sha256="b",
+                          base_source=BASE_SOURCE, new_source=FIXED_SOURCE, rationale="", diff="", diff_stat={}, validation=[])
+    with pytest.raises(PolicyError, match="nothing to replay from"):                 # smuggled / older stored proposal
+        w.oncall.apply_fix(incident["incident_id"], "h", actor="t")
+    assert writes(w.fake) == (0, 0)
+
+
+def test_C3_rollback_read_failure_is_recorded_and_a_retry_finishes_the_rollback(w, monkeypatch):
+    incident_id, p = proposed(w)
+    w.fake.replay_state = "FAILED"
+    real_get, real_wait, state = w.client.get_flow, w.client.wait_terminal, {"after": False}
+
+    def wait(*a, **k):
+        out = real_wait(*a, **k)
+        state["after"] = True
+        return out
+
+    def get_flow(ns, fid, **k):
+        if state["after"]:
+            raise KestraError("Kestra GET flow failed with HTTP 503", status=503)
+        return real_get(ns, fid, **k)
+    monkeypatch.setattr(w.client, "wait_terminal", wait)
+    monkeypatch.setattr(w.client, "get_flow", get_flow)
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "needs_human" and "could not be read" in r["message"] and "may still be live" in r["message"]
+    assert w.oncall.get_incident(incident_id)["status"] == "needs_human" and w.oncall.get_incident(incident_id)["result"]["status"] == "needs_human"
+    monkeypatch.undo()
+    done = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert done["status"] == "rolled_back" and w.fake.current(NS, FLOW)["source"] == BASE_SOURCE
+    assert writes(w.fake) == (2, 1) and len(w.fake.replays_of(w.exec_id)) == 1      # resumed, no second replay
+
+
+def test_C3_verification_read_failure_is_pending_then_verified(w, monkeypatch):
+    incident_id, p = proposed(w)
+    real = w.client.get_execution
+    state = {"fail": True}
+
+    def get_execution(eid):
+        if state["fail"] and eid == w.exec_id:
+            state["fail"] = False
+            raise KestraError("blip", status=503)
+        return real(eid)
+    monkeypatch.setattr(w.client, "get_execution", get_execution)
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "pending" and "could not be read to verify" in r["message"]
+    done = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert done["status"] == "verified" and writes(w.fake) == (1, 1)
+
+
+def test_C4_a_foreign_full_replay_is_not_adopted(w):
+    incident_id, p = proposed(w)
+    w.fake.put_flow(NS, FLOW, FIXED_SOURCE)                                       # revision 3 already holds the fix
+    foreign = w.client.replay(w.exec_id, task_run_id=None, revision=3)          # somebody replayed from the START
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "verified" and r["adopted_existing_replay"] is False
+    assert r["replay_execution_id"] != foreign["id"] and len(w.fake.replays_of(w.exec_id)) == 2
+    assert r["verification"]["failed_task_attempts"] == {"original": 1, "replay": 2}
+
+
+def test_C4_after_a_crash_only_our_own_replay_is_adopted_even_if_a_foreign_one_exists(w, monkeypatch):
+    incident_id, p = proposed(w)
+    w.fake.put_flow(NS, FLOW, FIXED_SOURCE)
+    foreign = w.client.replay(w.exec_id, task_run_id=None, revision=3)
+    real = w.client.replay
+
+    def replay_then_die(*a, **k):
+        real(*a, **k)
+        raise Crash()
+    monkeypatch.setattr(w.client, "replay", replay_then_die)
+    with pytest.raises(Crash):
+        w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    monkeypatch.undo()
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    ours = [e for e in w.fake.replays_of(w.exec_id) if e["id"] != foreign["id"]]
+    assert len(ours) == 1 and r["replay_execution_id"] == ours[0]["id"] and r["adopted_existing_replay"] is True
+    assert r["status"] == "verified"
+
+
+def test_C6_a_replay_waiting_on_a_pause_is_pending_with_a_clear_message(w):
+    incident_id, p = proposed(w)
+    w.fake.replay_state = "PAUSED"
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "pending" and r["replay_state"] == "PAUSED" and "waiting on a Pause task" in r["message"]
+    assert w.fake.current(NS, FLOW)["source"] == FIXED_SOURCE and writes(w.fake) == (1, 1)
+    w.fake.finish_replay(r["replay_execution_id"], "SUCCESS")
+    assert w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")["status"] == "verified"
+
+
+def test_C8_losing_the_lock_stops_the_apply_before_any_write(w, monkeypatch):
+    incident_id, p = proposed(w)
+    real, calls = w.store.lock, {"n": 0}
+
+    def lock(name, owner, ttl):
+        calls["n"] += 1
+        return real(name, owner, ttl) if calls["n"] == 1 else False        # first call takes it, renewals fail
+    monkeypatch.setattr(w.store, "lock", lock)
+    r = w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")
+    assert r["status"] == "busy" and writes(w.fake) == (0, 0)
+
+
+def test_C8_the_lock_is_renewed_before_every_phase(w, monkeypatch):
+    incident_id, p = proposed(w)
+    real, seen = w.store.lock, []
+    monkeypatch.setattr(w.store, "lock", lambda name, owner, ttl: (seen.append(name), real(name, owner, ttl))[1])
+    assert w.oncall.apply_fix(incident_id, p["proposal_sha256"], actor="t")["status"] == "verified"
+    assert seen.count(incident_id) >= 5            # take + write + replay + follow + verify
+
+
+def test_C11_warning_is_accepted_for_the_failed_task_when_the_replay_is_a_warning():
+    def run(task, state, attempts, rid):
+        return {"id": rid, "taskId": task, "state": {"current": state},
+                "attempts": [{"state": {"startDate": s, "endDate": e, "current": c}} for s, e, c in attempts]}
+    original = {"taskRunList": [run("a", "SUCCESS", [("1", "2", "SUCCESS")], "o1"), run("b", "FAILED", [("3", "4", "FAILED")], "o2")]}
+    warn = {"state": {"current": "WARNING"}, "taskRunList": [run("a", "SUCCESS", [("1", "2", "SUCCESS")], "n1"),
+            run("b", "WARNING", [("3", "4", "FAILED"), ("5", "6", "WARNING")], "n2")]}
+    v = inc.verify_replay(original, warn, "b")
+    assert v["ok"] is True and v["replay_state"] == "WARNING"
+
+
+def test_C13_a_deleted_flow_gives_a_clear_policy_error(w):
+    w.fake.flows.pop((NS, FLOW))
+    with pytest.raises(PolicyError, match=r"The flow hko.demo.orders no longer exists in Kestra"):
+        w.oncall.open_incident(w.exec_id)
+    assert w.store.list_incidents() == []
+
+
+def test_C13_flow_deleted_after_open_is_clear_for_propose(w):
+    incident = w.oncall.open_incident(w.exec_id)
+    w.fake.flows.pop((NS, FLOW))
+    with pytest.raises(PolicyError, match="no longer exists"):
+        w.oncall.propose_fix(incident["incident_id"], FIXED_SOURCE, "r")
+
+
+def test_C14_only_the_latest_five_proposals_are_kept(w):
+    incident = w.oncall.open_incident(w.exec_id)
+    shas = [w.oncall.propose_fix(incident["incident_id"], FIXED_SOURCE + f"# v{i}\n", "r")["proposal_sha256"] for i in range(8)]
+    kept = w.store._all("SELECT proposal_sha256 FROM proposals WHERE incident_id = ?", (incident["incident_id"],))
+    assert len(kept) == 5 and shas[-1] in {k["proposal_sha256"] for k in kept} and shas[0] not in {k["proposal_sha256"] for k in kept}
+    assert w.store.get_proposal(incident["incident_id"])["proposal_sha256"] == shas[-1]
+
+
+def test_C9_a_repeat_failure_points_to_the_open_incident(w):
+    first = w.oncall.open_incident(w.exec_id)
+    second_exec = w.fake.add_execution(NS, FLOW, 2, [("extract", "SUCCESS"), ("transform", "FAILED")])
+    second = w.oncall.open_incident(second_exec["id"])
+    assert second["incident_id"] != first["incident_id"]
+    assert second["related_incident"]["incident_id"] == first["incident_id"] and "reuse its proposal" in second["note"]
+    assert "related_incident" not in first
+    other = w.fake.add_execution(NS, FLOW, 2, [("extract", "FAILED")])                  # a different failed task: unrelated
+    assert "related_incident" not in w.oncall.open_incident(other["id"])
+
+
+def flow_with(task_yaml: str) -> str:
+    return f"id: {FLOW}\nnamespace: {NS}\ntasks:\n  - id: extract\n    type: io.kestra.plugin.core.debug.Return\n    format: ok\n{task_yaml}"
+
+
+def test_C12_a_failed_subflow_task_points_to_the_child_execution_and_is_diagnose_only(w):
+    source = flow_with("  - id: sub\n    type: io.kestra.plugin.core.flow.Subflow\n    namespace: hko.demo\n    flowId: child\n    wait: true\n")
+    w.fake.put_flow(NS, FLOW, source)
+    w.fake.put_flow(NS, "child", GOOD_SOURCE.replace(f"id: {FLOW}", "id: child").replace("extract", "child_task").replace("transform", "t2"))
+    child = w.fake.add_execution(NS, "child", 1, [("child_task", "FAILED")])
+    parent = w.fake.add_execution(NS, FLOW, 3, [("extract", "SUCCESS"), ("sub", "FAILED")])
+    sub_run = parent["taskRunList"][1]["id"]
+    w.fake.outputs[parent["id"]][sub_run] = {"executionId": child["id"], "state": "FAILED"}   # measured on 2.0.9
+    incident = w.oncall.open_incident(parent["id"])
+    (c,) = incident["child_executions"]
+    assert c["execution_id"] == child["id"] and (c["namespace"], c["flow_id"], c["state"]) == (NS, "child", "FAILED")
+    assert c["errors"] and "Open an incident on the child execution" in incident["diagnose_only_reason"]
+    with pytest.raises(PolicyError, match="Open an incident on the child execution"):
+        w.oncall.propose_fix(incident["incident_id"], source + "# x\n", "r")
+    assert w.oncall.open_incident(child["id"])["failed_task_id"] == "child_task"                  # the right incident is open-able
+    assert writes(w.fake) == (0, 0)
+
+
+def test_C12_a_failed_loop_is_diagnose_only_because_kestra_cannot_replay_it(w):
+    source = flow_with("  - id: each\n    type: io.kestra.plugin.core.flow.Loop\n    values: [a, b]\n    tasks:\n      - id: item\n"
+                       "        type: io.kestra.plugin.core.log.Log\n        message: x\n")
+    w.fake.put_flow(NS, FLOW, source)
+    child = w.fake.add_execution(NS, FLOW, 3, [("item", "FAILED")])
+    parent = w.fake.add_execution(NS, FLOW, 3, [("extract", "SUCCESS"), ("each", "FAILED")])
+    w.fake.logs[parent["id"]].append({"level": "ERROR", "taskId": "each", "taskRunId": parent["taskRunList"][1]["id"], "timestamp": "t",
+                                      "message": f'Loop iteration 1 ended in FAILED in sub-execution [[link execution="{child["id"]}" flowId="{FLOW}" namespace="{NS}"]]'})
+    incident = w.oncall.open_incident(parent["id"])
+    assert [c["execution_id"] for c in incident["child_executions"]] == [child["id"]]
+    assert "cannot replay a failed Loop" in incident["diagnose_only_reason"]
+    with pytest.raises(PolicyError, match="cannot replay a failed Loop"):
+        w.oncall.propose_fix(incident["incident_id"], source + "# x\n", "r")
+    w.store.save_proposal(incident["incident_id"], proposal_sha256="h", base_revision=3, base_source_sha256="b", base_source=source,
+                          new_source=source + "# x\n", rationale="", diff="", diff_stat={}, validation=[])
+    with pytest.raises(PolicyError, match="cannot replay a failed Loop"):
+        w.oncall.apply_fix(incident["incident_id"], "h", actor="t")
+    assert writes(w.fake) == (0, 0)
+
+
+def test_C12_a_plain_failed_task_has_no_children_or_diagnose_only_reason(w):
+    incident = w.oncall.open_incident(w.exec_id)
+    assert "child_executions" not in incident and "diagnose_only_reason" not in incident
+
+
+def test_C12_child_link_that_appears_late_in_the_logs_is_found(w, monkeypatch):
+    import kestra_oncall.incidents as incidents_module
+    monkeypatch.setattr(incidents_module, "CHILD_LOOKUP_PAUSE_S", 0.01)
+    source = flow_with("  - id: each\n    type: io.kestra.plugin.core.flow.Loop\n    values: [a]\n    tasks:\n      - id: item\n"
+                       "        type: io.kestra.plugin.core.log.Log\n        message: x\n")
+    w.fake.put_flow(NS, FLOW, source)
+    child = w.fake.add_execution(NS, FLOW, 3, [("item", "FAILED")])
+    parent = w.fake.add_execution(NS, FLOW, 3, [("extract", "SUCCESS"), ("each", "FAILED")])
+    real, calls = w.client.get_logs, {"n": 0}
+
+    def late(execution_id, **kw):
+        calls["n"] += 1
+        rows = real(execution_id, **kw)
+        if execution_id == parent["id"] and calls["n"] >= 3:
+            rows = rows + [{"level": "ERROR", "taskId": "each", "taskRunId": "x", "timestamp": "t",
+                            "message": f'Loop iteration 1 ended in FAILED in sub-execution [[link execution="{child["id"]}" flowId="{FLOW}"]]'}]
+        return rows
+    monkeypatch.setattr(w.client, "get_logs", late)
+    incident = w.oncall.open_incident(parent["id"])
+    assert [c["execution_id"] for c in incident["child_executions"]] == [child["id"]]

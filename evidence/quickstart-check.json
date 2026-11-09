@@ -1,0 +1,62 @@
+{
+  "generated": "2026-11-09T11:58:22+0530",
+  "steps": [
+    {
+      "step": "1 start Kestra 2.0.9 with basic auth and the two forwarder secrets",
+      "seconds": 7.9,
+      "ok": true,
+      "note": "Kestra 2.0.9 answering"
+    },
+    {
+      "step": "2 install and enable the plugin",
+      "seconds": 50.8,
+      "ok": true,
+      "note": "enabled on attempt 1 (local path instead of the GitHub install line)"
+    },
+    {
+      "step": "3 configure and run `hermes kestra-oncall doctor`",
+      "seconds": 2.9,
+      "ok": true,
+      "note": "doctor ok {\"connectivity\": true, \"authentication_configured\": true, \"authentication_accepted\": true, \"allowed_namespaces\": true, \"kestra_2\": true, \"approvals_not_bypassed\": true}"
+    },
+    {
+      "step": "4 webhook route, WEBHOOK_SECRET, start the gateway",
+      "seconds": 6.3,
+      "ok": true,
+      "note": "webhook healthy on :36979"
+    },
+    {
+      "step": "5 deploy the forwarder (README sed | curl)",
+      "seconds": 25.1,
+      "ok": true,
+      "note": "forwarder deployed in namespace ops"
+    },
+    {
+      "step": "6 deploy the demo flows and run orders_etl",
+      "seconds": 1.9,
+      "ok": true,
+      "note": "orders_etl FAILED as designed, execution 6GGp1exPwjE9UFFEyk9JyG"
+    },
+    {
+      "step": "7a wait for the incident and proposal (model)",
+      "seconds": 102.0,
+      "ok": true,
+      "note": "proposal for INC-83b7d204 stored"
+    },
+    {
+      "step": "7b type /kestra apply <id> <hash> in the real terminal UI",
+      "seconds": 242.2,
+      "ok": false,
+      "note": "RuntimeError: no \"verified\" on the screen: \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\r\u2500\r\r\n \u2624 gpt-6-astra \u00b7 ctx -- \u00b7 [\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591\u2591] -- \u00b7 1s \u00b7 \u23f2 0s \u00b7 ~/hermes-kestra-oncall (main)                                                                                    / commands \u00b7 @ files \u00b7 ! shell\r \r\u001b[2 q"
+    }
+  ],
+  "total_seconds": 439.1,
+  "substitutions": [
+    "local plugin path instead of the GitHub install line",
+    "--deliver log (no chat bot on this machine)",
+    "model block written into config.yaml",
+    "aiohttp installed into the managed environment (README requirement 1) by rig/deps.py",
+    "ports 37779 (Kestra) and 36979 (webhook)"
+  ],
+  "completed_all_steps": false
+}

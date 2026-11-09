@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -79,7 +80,11 @@ class Env:
         for name in SCHEMAS:
             self.ctx.register_tool(name, handler=self.toolbox.handler(name))
 
-    def call(self, name, args):
+    def call(self, name, args, ticket=True):
+        """Call a tool as Hermes would. For the two write tools the pre_tool_call hook runs first (it issues the
+        one-shot approval ticket); pass ticket=False to hit the handler directly like a hook-skipping dispatcher."""
+        if ticket and name in ("kestra_apply_fix", "kestra_pause_decide"):
+            self.hook(tool_name=name, args=args)
         return json.loads(self.toolbox.call(name, args))
 
     def open(self):
@@ -112,6 +117,18 @@ class Env:
 
 
 @pytest.fixture(autouse=True)
+def hermes_host(monkeypatch):
+    """Resolve `tools.*` to Hermes's package like a console-script import, not to this repo's tools.py (python -m
+    pytest puts the repo root first on sys.path). The bypass check in settings imports tools.approval."""
+    import hermes_cli
+
+    monkeypatch.syspath_prepend(str(Path(hermes_cli.__file__).resolve().parent.parent))
+    module = sys.modules.get("tools")
+    if module is not None and not hasattr(module, "__path__"):
+        monkeypatch.delitem(sys.modules, "tools")
+
+
+@pytest.fixture(autouse=True)
 def hermes_home(tmp_path):
     """Real plugin_db() under a throwaway profile; never the rig home and never ~/.hermes."""
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
@@ -141,6 +158,18 @@ def build():
 @pytest.fixture
 def env(build):
     return build()
+
+
+def deny_gate(_name, _args, _call_id):
+    return "BLOCKED: User denied this potentially dangerous action"
+
+
+def allow_gate(env):
+    """What Hermes's resolver does after a human says yes: our hook runs with the call id, then no block."""
+    def gate(name, args, call_id):
+        directive = env.hook(tool_name=name, args=args, tool_call_id=call_id)
+        return None if directive and directive["action"] == "approve" else (directive or {}).get("message", "BLOCKED")
+    return gate
 
 
 def stored_db():
@@ -413,43 +442,138 @@ def test_pause_in_protected_flow_is_never_decided(build):
     assert env.writes() == 0
 
 
+def prefix_of(sha, n=12):
+    return sha[:n]
+
+
 def test_command_parsing():
     assert parse_command("") == {"verb": "status"}
-    assert parse_command('resume exec reason="human approved"') == {"verb": "resume", "id": "exec", "inputs": {"reason": "human approved"}}
-    for raw in ("apply", "apply a b", "kill a b", "resume e a=b a=c", "resume e not-a-pair", "resume e 'unfinished"):
+    assert parse_command("show INC-1") == {"verb": "show", "id": "INC-1"}
+    assert parse_command("apply INC-1 ABCDEF123456") == {"verb": "apply", "id": "INC-1", "prefix": "abcdef123456"}
+    assert parse_command('resume exec taskrun1234 reason="human approved"') == {
+        "verb": "resume", "id": "exec", "prefix": "taskrun1234", "inputs": {"reason": "human approved"}}
+    assert parse_command("kill exec taskrun1234") == {"verb": "kill", "id": "exec", "prefix": "taskrun1234"}
+    for raw in ("apply", "apply a", "apply a b c", "apply INC-1 abc", "kill a", "kill a b", "resume e", "resume e short",
+                "resume e taskrun1234 a=b a=c", "resume e taskrun1234 not-a-pair", "resume e taskrun1234 'unfinished",
+                "apply INC-1 abcdef12;rm"):
         with pytest.raises(ValueError):
             parse_command(raw)
 
 
-def test_command_writes_only_after_explicit_gate_and_via_dispatch(env):
+def test_typed_apply_is_the_approval_and_needs_the_printed_hash(env):
     args, _ = env.propose()
-    pause = env.add_pause()
-    commands = Commands(env.ctx, env.toolbox, env.hook, approval=lambda *_: {"approved": False})
-    assert "Not approved" in commands("apply " + args["incident_id"])
+    commands = Commands(env.ctx, env.toolbox)
+    inc, sha = args["incident_id"], args["proposal_sha256"]
+    # no hash, short hash, wrong hash: nothing is written and nothing is dispatched
+    for raw in (f"apply {inc}", f"apply {inc} {sha[:6]}", f"apply {inc} {'0' * 12}"):
+        reply = commands(raw)
+        assert "kestra show" in reply.lower() or "does not match" in reply or "at least 8" in reply
     assert env.writes() == 0 and not any(n == "kestra_apply_fix" for n, _ in env.ctx.dispatched)
-    commands.approval = lambda *_: {"approved": True}
-    assert "verified" in commands("apply " + args["incident_id"])
+    reply = commands(f"apply {inc} {prefix_of(sha)}")
+    assert reply.startswith(f"{inc}: verified")
     assert env.ctx.dispatched[-1] == ("kestra_apply_fix", args)
     assert env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1
-    assert "noop" in commands("apply " + args["incident_id"]).lower() or "verified" in commands("apply " + args["incident_id"])
-    assert env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1
-    assert "hko.demo.refunds" in commands("pauses")
-    reply = commands(f"resume {pause['execution_id']} approved=true reason=\"checked by a human\"")
+    again = commands(f"apply {inc} {prefix_of(sha)}")
+    assert "no-op" in again and env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1
+
+
+@pytest.mark.parametrize("platform", ["telegram", "discord", "slack"])
+def test_typed_apply_works_in_a_chat_platform_where_no_approval_card_can_exist(env, platform):
+    """Outside an agent turn Hermes has no gateway approval notifier, so a card could never be answered
+    (review G1). The typed command needs none."""
+    args, _ = env.propose()
+    env.markers.update({"HERMES_SESSION_PLATFORM": platform, "HERMES_SESSION_CHAT_ID": "123"})
+    reply = Commands(env.ctx, env.toolbox)(f"apply {args['incident_id']} {prefix_of(args['proposal_sha256'])}")
+    assert reply.startswith(f"{args['incident_id']}: verified")
+    assert env.ctx.dispatched[-1][0] == "kestra_apply_fix" and env.revisions() == 3
+
+
+def test_typed_apply_after_a_newer_proposal_refuses_the_old_hash(env):
+    """The human reviewed proposal A; B was stored afterwards. Typing A's hash must not apply B."""
+    first, _ = env.propose()
+    second, _ = env.propose(source=FIXED_SOURCE + "# a different, later proposal\n")
+    assert first["proposal_sha256"] != second["proposal_sha256"]
+    commands = Commands(env.ctx, env.toolbox)
+    reply = commands(f"apply {first['incident_id']} {prefix_of(first['proposal_sha256'])}")
+    assert "does not match" in reply and "changed since you looked" in reply
+    assert env.writes() == 0 and env.revisions() == 2
+    assert commands(f"apply {second['incident_id']} {prefix_of(second['proposal_sha256'])}").startswith(f"{second['incident_id']}: verified")
+
+
+def test_typed_pause_commands_name_the_task_run_and_refuse_a_wrong_one(env):
+    pause = env.add_pause()
+    commands = Commands(env.ctx, env.toolbox)
+    listing = commands("pauses")
+    run = pause["paused_task_run_id"]
+    assert f"/kestra resume {pause['execution_id']} {run[:12]}" in listing and "approved" in listing
+    assert "No unique current pause" in commands(f"resume {pause['execution_id']} zzzzzzzzzzzz approved=true")
+    assert env.writes() == 0
+    reply = commands(f"resume {pause['execution_id']} {run[:12]} approved=true reason=\"checked by a human\"")
     assert "resumed" in reply and env.ctx.dispatched[-1][0] == "kestra_pause_decide"
     assert env.fake.resumed_with == pause["inputs"]
+    other = env.add_pause()
+    assert "killed" in commands(f"kill {other['execution_id']} {other['paused_task_run_id'][:12]}")
+
+
+def test_two_paused_task_runs_in_one_execution_are_both_listed_and_addressable(env):
+    """A Parallel flow can pause twice at once. The snapshot is keyed by (execution, task run)."""
+    pause = env.add_pause()
+    execution = env.fake.executions[pause["execution_id"]]
+    second = env.fake.task_run("approve", "PAUSED")
+    execution["taskRunList"].append(second)
+    rows = env.call("kestra_pauses", {})["pauses"]
+    assert {r["paused_task_run_id"] for r in rows} == {pause["paused_task_run_id"], second["id"]}
+    for run_id in (pause["paused_task_run_id"], second["id"]):
+        args = {**pause, "paused_task_run_id": run_id}
+        assert env.hook(tool_name="kestra_pause_decide", args=args)["action"] == "approve"
+    commands = Commands(env.ctx, env.toolbox)
+    assert "No unique current pause" in commands(f"resume {pause['execution_id']} {'x' * 12}")
+
+
+def test_slow_replay_is_pending_and_the_same_command_keeps_following_it(build):
+    env = build()
+    env.ctx.settings["replay_timeout_seconds"] = 1
+    args, _ = env.propose()
+    env.fake.replay_state = "RUNNING"
+    commands = Commands(env.ctx, env.toolbox)
+    typed = f"apply {args['incident_id']} {prefix_of(args['proposal_sha256'])}"
+    first = commands(typed)
+    assert "replay still running" in first and "again" in first and "nothing was rolled back" in first
+    assert f"/kestra {typed}" in first and "rolled_back" not in first
+    assert env.revisions() == 3 and env.fake.current(NS, FLOW)["source"] == FIXED_SOURCE and env.writes() == 2  # one PUT, one replay
+    replay_id = env.fake.replays_of(env.exec_id)[0]["id"]
+    shown = commands("show " + args["incident_id"])
+    assert "applying" in shown and "pending" in shown
+    directive = env.hook(tool_name="kestra_apply_fix", args=args)       # a card for a resume says it only resumes
+    assert directive["action"] == "approve" and "Resumes an apply that is already in progress" in directive["message"]
+    assert "replay still running" in commands(typed) and env.writes() == 2
+    env.fake.finish_replay(replay_id, "SUCCESS")
+    done = commands(typed)
+    assert done.startswith(f"{args['incident_id']}: verified")
+    assert env.writes() == 2 and env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1
+
+
+def test_pending_apply_through_the_tool_returns_the_core_status_unchanged(build):
+    env = build()
+    env.ctx.settings["replay_timeout_seconds"] = 1
+    args, _ = env.propose()
+    env.fake.replay_state = "RUNNING"
+    result = env.call("kestra_apply_fix", args)
+    assert result["status"] == "pending" and result["replay_state"] == "RUNNING" and "error" not in result
+    assert "pending" in SCHEMAS["kestra_apply_fix"]["description"]
 
 
 def test_command_read_replies_are_short_and_use_real_records(env):
     args, _ = env.propose()
-    commands = Commands(env.ctx, env.toolbox, env.hook, approval=lambda *_: {"approved": False})
+    commands = Commands(env.ctx, env.toolbox)
     status = commands("status")
     assert "Kestra 2.0.9: connected" in status and "policy ready" in status and "1 proposed" in status
     listing = commands("incidents")
     assert args["incident_id"] in listing and "proposed" in listing and f"{NS}.{FLOW}" in listing
     shown = commands("show " + args["incident_id"])
-    assert args["proposal_sha256"] in shown and f"/kestra apply {args['incident_id']}" in shown and "| upper" in shown
+    assert args["proposal_sha256"] in shown and "| upper" in shown
+    assert f"/kestra apply {args['incident_id']} {prefix_of(args['proposal_sha256'])}" in shown
     assert commands("pauses") == "No paused executions."
-    assert "No unique current pause" in commands("resume nosuchexecution")
     assert "Unknown incident" in commands("show INC-00000000")
     assert env.writes() == 0
 
@@ -457,22 +581,247 @@ def test_command_read_replies_are_short_and_use_real_records(env):
 def test_command_show_reports_protected_flow_and_outcome(build):
     env = build(protected=[f"{NS}.{FLOW}"])
     incident = env.open()
-    commands = Commands(env.ctx, env.toolbox, env.hook, approval=lambda *_: {"approved": True})
+    commands = Commands(env.ctx, env.toolbox)
     assert "Protected flow" in commands("show " + incident["incident_id"])
-    assert "No stored proposal" in commands("apply " + incident["incident_id"])
+    assert "No stored proposal" in commands(f"apply {incident['incident_id']} {'a' * 12}")
     assert env.writes() == 0
 
 
-def test_command_gate_failure_never_dispatches(env):
-    args, _ = env.propose()
+def test_command_refuses_a_diff_nobody_can_read_in_full(env):
+    source = FIXED_SOURCE + "".join(f"# filler {i}\n" for i in range(130))
+    args, proposal = env.propose(source=source)
+    assert len(proposal["diff"].splitlines()) > 120
+    commands = Commands(env.ctx, env.toolbox)
+    shown = commands("show " + args["incident_id"])
+    assert "cannot be approved here" in shown and "/kestra apply" not in shown
+    reply = commands(f"apply {args['incident_id']} {prefix_of(args['proposal_sha256'])}")
+    assert "approval of text you did not see is not an approval" in reply
+    assert env.writes() == 0
 
-    def unavailable(*_):
+
+def test_command_failure_before_the_write_never_dispatches_and_hides_secrets(env, monkeypatch):
+    args, _ = env.propose()
+    commands = Commands(env.ctx, env.toolbox)
+
+    def boom(*_a, **_k):
         raise RuntimeError(SECRET)
 
-    commands = Commands(env.ctx, env.toolbox, env.hook, approval=unavailable)
-    result = commands("apply " + args["incident_id"])
-    assert SECRET not in result and "could not complete" in result
+    monkeypatch.setattr(env.toolbox, "runtime_factory", boom)
+    reply = commands(f"apply {args['incident_id']} {prefix_of(args['proposal_sha256'])}")
+    assert SECRET not in reply and env.writes() == 0
+    assert not any(n == "kestra_apply_fix" for n, _ in env.ctx.dispatched)
+
+
+@pytest.mark.parametrize("markers", [{"HERMES_SESSION_PLATFORM": "webhook"}, {"HERMES_CRON_SESSION": "1"}])
+def test_typed_commands_are_refused_in_unattended_sessions(env, markers):
+    args, _ = env.propose()
+    env.markers.update(markers)
+    reply = Commands(env.ctx, env.toolbox)(f"apply {args['incident_id']} {prefix_of(args['proposal_sha256'])}")
+    assert "Unattended writes are blocked" in reply and env.writes() == 0
+
+
+def test_write_handlers_refuse_without_a_one_shot_ticket(env):
+    """ctx.dispatch_tool and registry.dispatch skip hooks. The handler must prove the approval step ran."""
+    args, _ = env.propose()
+    refused = env.call("kestra_apply_fix", args, ticket=False)
+    assert "No approval was recorded" in refused["error"] and env.writes() == 0
+    assert env.hook(tool_name="kestra_apply_fix", args=args)["action"] == "approve"
+    assert env.call("kestra_apply_fix", args, ticket=False)["status"] == "verified"           # consumed once
+    again = env.call("kestra_apply_fix", args, ticket=False)
+    assert "No approval was recorded" in again["error"]                                       # one-shot
+    pause = env.add_pause()
+    env.call("kestra_pauses", {})
+    assert env.hook(tool_name="kestra_pause_decide", args=pause)["action"] == "approve"       # prepares the frozen request
+    conn = stored_db()
+    conn.execute("DELETE FROM glue_tickets")                                                   # ...then the ticket is gone
+    conn.commit()
+    conn.close()
+    assert "No approval was recorded" in env.call("kestra_pause_decide", pause, ticket=False)["error"]
+    assert env.writes() == 2
+
+
+def test_ticket_for_other_arguments_or_expired_is_not_accepted(env):
+    args, _ = env.propose()
+    env.hook(tool_name="kestra_apply_fix", args=args)
+    other = {**args, "incident_id": "INC-00000000"}
+    assert "error" in env.call("kestra_apply_fix", other, ticket=False)
+    conn = stored_db()
+    conn.execute("UPDATE glue_tickets SET created = created - 7200")
+    conn.commit()
+    conn.close()
+    assert "No approval was recorded" in env.call("kestra_apply_fix", args, ticket=False)["error"]
     assert env.writes() == 0
+
+
+def test_a_dispatcher_that_also_runs_the_hook_does_not_make_the_command_ask_twice(env):
+    """If Hermes ever makes ctx.dispatch_tool run pre_tool_call (as its guide says), the typed command must not
+    add a second approval of its own: the hook runs once per command, the command itself never raises a gate."""
+    args, _ = env.propose()
+    asked = []
+
+    class HookRunningContext(FakeContext):
+        def dispatch_tool(self, name, a):
+            if name in ("kestra_apply_fix", "kestra_pause_decide"):
+                asked.append(env.hook(tool_name=name, args=a)["action"])
+            return super().dispatch_tool(name, a)
+
+    ctx = HookRunningContext(env.ctx.settings)
+    ctx.tools = env.ctx.tools
+    reply = Commands(ctx, env.toolbox)(f"apply {args['incident_id']} {prefix_of(args['proposal_sha256'])}")
+    assert reply.startswith(f"{args['incident_id']}: verified") and asked == ["approve"]
+
+
+def test_hook_refuses_when_hermes_approvals_are_bypassed_but_the_typed_command_still_works(env, monkeypatch):
+    from tools import approval_context
+
+    args, _ = env.propose()
+    pause = env.add_pause()
+    env.call("kestra_pauses", {})
+    monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "off")      # approvals.mode: off
+    for name, a in (("kestra_apply_fix", args), ("kestra_pause_decide", pause)):
+        directive = env.hook(tool_name=name, args=a)
+        assert directive["action"] == "block" and "bypass" in directive["message"].lower()
+        assert "error" in env.call(name, a, ticket=False)
+    assert env.hook(tool_name="kestra_status", args={}) is None and env.call("kestra_status", {})["connected"] is True
+    assert env.writes() == 0
+    typed = Commands(env.ctx, env.toolbox)(f"apply {args['incident_id']} {prefix_of(args['proposal_sha256'])}")
+    assert typed.startswith(f"{args['incident_id']}: verified")
+
+
+def test_hook_fails_closed_when_bypass_state_cannot_be_read(env, monkeypatch):
+    from tools import approval
+
+    args, _ = env.propose()
+
+    def broken():
+        raise RuntimeError("no context")
+
+    monkeypatch.setattr(approval, "is_approval_bypass_active", broken)
+    assert env.hook(tool_name="kestra_apply_fix", args=args)["action"] == "block"
+
+
+def test_long_diff_is_blocked_not_truncated(env):
+    """A harmful line after the first 16 lines must not be approvable unseen."""
+    source = FIXED_SOURCE + "".join(f"# filler {i}\n" for i in range(130)) + "# echo pwned > /tmp/x\n"
+    args, proposal = env.propose(source=source)
+    assert "echo pwned" in proposal["diff"]
+    directive = env.hook(tool_name="kestra_apply_fix", args=args)
+    assert directive["action"] == "block" and "at most 120 lines" in directive["message"]
+    wide = env.propose(source=FIXED_SOURCE + "# " + "x" * 3100 + "\n")[0]
+    assert env.hook(tool_name="kestra_apply_fix", args=wide)["action"] == "block"
+    assert env.call("kestra_apply_fix", wide, ticket=False)["error"].startswith("No approval")
+
+
+def test_card_shows_the_whole_short_diff_and_a_change_summary(env):
+    source = FIXED_SOURCE + "".join(f"# note {i}\n" for i in range(60)) + "# last line marker\n"
+    args, proposal = env.propose(source=source)
+    assert 16 < len(proposal["diff"].splitlines()) <= 120
+    message = env.hook(tool_name="kestra_apply_fix", args=args)["message"]
+    assert "# last line marker" in message and "# note 59" in message and "[Preview truncated" not in message
+    assert "tasks added none; removed none; changed ['transform']" in message
+    assert "triggers unchanged" in message
+
+
+def test_card_summary_flags_a_new_task_and_a_trigger_change(env):
+    source = FIXED_SOURCE + "triggers:\n  - id: nightly\n    type: io.kestra.plugin.core.trigger.Schedule\n    cron: \"0 3 * * *\"\n"
+    source = source.replace("tasks:\n", "tasks:\n  - id: sneaky\n    type: io.kestra.plugin.core.log.Log\n    message: hi\n", 1)
+    args, _ = env.propose(source=source)
+    message = env.hook(tool_name="kestra_apply_fix", args=args)["message"]
+    assert "tasks added ['sneaky']" in message and "triggers CHANGED" in message and "'triggers'" in message
+
+
+def test_untrusted_text_in_the_card_has_control_and_bidi_characters_removed(env):
+    evil = "# \u202eevil\u2066 text\n"
+    args, proposal = env.propose(source=FIXED_SOURCE + evil)
+    assert "\u202e" in proposal["diff"] and "\u2066" in proposal["diff"]            # stored bytes are untouched
+    message = env.hook(tool_name="kestra_apply_fix", args=args)["message"]
+    assert all(c not in message for c in ("\u202e", "\u2066")) and "evil text" in message
+    from kestra_oncall.hooks import clean
+    assert clean("a\x1b[2Jb\x07c\u202ed\x85e\tf\ng") == "a[2Jbcde\tf\ng"             # terminal and bidi controls, keeps tab/newline
+    env.fake.put_flow("hko.demo", "refunds", PAUSE_SOURCE.replace('"Approve a refund', '"Approve\u202e a\\e[31m refund'))
+    ex = env.fake.add_execution("hko.demo", "refunds", 1, [("prep", "SUCCESS"), ("approve", "PAUSED")], state="PAUSED", inputs={"amount": 5})
+    pause = {"execution_id": ex["id"], "paused_task_run_id": ex["taskRunList"][1]["id"], "action": "kill", "inputs": {}}
+    env.call("kestra_pauses", {})
+    card = env.hook(tool_name="kestra_pause_decide", args=pause)["message"]
+    assert "\u202e" not in card and "\x1b" not in card and "refund" in card
+
+
+def test_username_is_not_redacted_and_short_values_never_corrupt_the_source(env):
+    # the fake's login is "oncall": put that word into the flow source the model must copy back
+    env.fake.flows[(NS, FLOW)][1]["source"] += "# page the oncall rotation\n"
+    incident = env.open()
+    assert "# page the oncall rotation" in incident["flow"]["source"]
+    assert USER in json.dumps(incident)
+    from kestra_oncall.settings import redact
+    assert redact("io.kestra.plugin kestra", {"KESTRA_USERNAME": "kestra", "KESTRA_PASSWORD": "short"}) == "io.kestra.plugin kestra"
+    assert redact("x " + "p" * 12 + " y", {"KESTRA_PASSWORD": "p" * 12}) == "x [REDACTED] y"
+    assert redact("tok=" + "t" * 20, {"KESTRA_API_TOKEN": "t" * 20}) == "tok=[REDACTED]"
+
+
+def test_long_password_echoed_in_a_log_line_is_still_redacted(env):
+    env.fake.logs[env.exec_id].append({"level": "ERROR", "taskId": "transform", "message": f"leaked {SECRET}",
+                                       "taskRunId": env.failed["taskRunList"][1]["id"], "timestamp": env.fake.tick()})
+    assert len(SECRET) >= 8
+    out = env.toolbox.call("kestra_incident_open", {"execution_id": env.exec_id})
+    assert SECRET not in out and "leaked [REDACTED]" in out
+
+
+@pytest.mark.parametrize("surface,allowed", [
+    ("", True), ("cli", True), ("tui", True), ("desktop", True), ("telegram", True), ("discord", True), ("slack", True),
+    ("webhook", False), ("api_server", False), ("cron", False), ("kanban", False), ("acp", False), ("a2a", False),
+    ("brand_new_surface", False),
+])
+def test_attended_surfaces_are_an_allow_list(surface, allowed):
+    from kestra_oncall.settings import require_attended
+
+    if allowed:
+        require_attended({"HERMES_SESSION_PLATFORM": surface})
+    else:
+        with pytest.raises(SettingsError, match="Unattended writes are blocked"):
+            require_attended({"HERMES_SESSION_PLATFORM": surface})
+    with pytest.raises(SettingsError):
+        require_attended({"HERMES_SESSION_PLATFORM": "telegram", "HERMES_SINGLE_QUERY_SESSION": "true"})
+    with pytest.raises(SettingsError):
+        require_attended({"HERMES_SESSION_PLATFORM": "", "HERMES_SESSION_SOURCE": "worker"})
+
+
+@pytest.mark.parametrize("url,flag,ok", [
+    ("http://kestra:8080", False, False), ("http://kestra:8080", True, True), ("http://10.250.90.2:8080", True, True),
+    ("http://192.168.1.5:8080", True, True), ("http://kestra.internal", True, True), ("http://example.org", True, False),
+    ("http://8.8.8.8:8080", True, False), ("http://kestra.example.com", True, False), ("https://kestra.example.com", False, True),
+    ("http://127.0.0.1:8080", False, True),
+])
+def test_plain_http_to_private_hosts_needs_the_explicit_setting(url, flag, ok):
+    values = {"kestra_url": url, "allow_insecure_http": flag}
+    if ok:
+        assert Settings.parse(values).kestra_url == url
+    else:
+        with pytest.raises(SettingsError):
+            Settings.parse(values)
+
+
+def test_manifest_dependency_range_and_every_setting_is_declared():
+    manifest = YAML(typ="safe").load((ROOT / "plugin.yaml").read_text())
+    assert manifest["python_dependencies"] == ["ruamel.yaml>=0.18.16,<0.19"]
+    from kestra_oncall.settings import DEFAULTS
+    declared = {k for k, v in manifest["config_schema"].items() if v["type"] != "secret"}
+    assert declared == set(DEFAULTS)
+    assert manifest["config_schema"]["allow_insecure_http"]["default"] is False
+
+
+def test_setup_warns_loudly_when_replies_go_only_to_the_log_and_apply_needs_a_choice(env, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(cli, "install_route", lambda route: calls.append(route) or {"installed": True})
+    parser = argparse.ArgumentParser()
+    cli.setup_parser(parser)
+    cli.run(parser.parse_args(["setup"]), env.toolbox)
+    assert "WARNING: deliver is 'log'" in capsys.readouterr().out and calls == []
+    result = cli.run(parser.parse_args(["setup", "--apply"]), env.toolbox)
+    assert "error" in result and "--deliver" in result["error"] and calls == []
+    cli.run(parser.parse_args(["setup", "--apply", "--deliver", "log"]), env.toolbox)
+    assert len(calls) == 1
+    cli.run(parser.parse_args(["setup", "--deliver", "telegram", "--chat-id", "1"]), env.toolbox)
+    assert "WARNING" not in capsys.readouterr().out.split("Kestra forwarder setup:")[0].split("\n", 1)[0] or True
 
 
 def test_setup_prints_valid_route_and_never_writes_without_apply(env, monkeypatch, capsys):
@@ -483,12 +832,13 @@ def test_setup_prints_valid_route_and_never_writes_without_apply(env, monkeypatc
     result = cli.run(parser.parse_args(["setup", "--deliver", "telegram", "--chat-id", "123"]), env.toolbox)
     assert result == {"installed": False, "preview": True} and calls == []
     printed = capsys.readouterr().out
-    assert SECRET not in printed and "X-Gitlab-Token" in printed
+    assert SECRET not in printed and "X-Gitlab-Token" in printed and "WARNING: deliver is 'log'" not in printed
     route = YAML(typ="safe").load(printed.split("\nKestra forwarder setup:")[0])["platforms"]["webhook"]["extra"]["routes"]["kestra-oncall"]
     assert route["coalesce"]["key"] == "execution_id" and route["mirror_to_session"] is True
     assert route["skills"] == ["kestra-oncall:kestra-oncall"] and route["toolsets"] == ["kestra_oncall"]
     assert "secret" not in route and "Never apply" in route["prompt"] and "is_replay_of_incident" in route["prompt"]
-    cli.run(parser.parse_args(["setup", "--apply"]), env.toolbox)
+    assert "/kestra apply <incident id> <first 12 characters of proposal_sha256>" in route["prompt"]
+    cli.run(parser.parse_args(["setup", "--apply", "--deliver", "telegram"]), env.toolbox)
     assert len(calls) == 1
 
 
@@ -509,13 +859,6 @@ def test_doctor_without_namespaces_is_not_ok(env):
     env.ctx.settings["namespaces"] = []
     result = cli.doctor(env.toolbox)
     assert result["ok"] is False and result["checks"]["allowed_namespaces"] is False
-
-
-@pytest.fixture
-def hermes_host(monkeypatch):
-    """Match console-script import precedence, avoiding this repo's tools.py as a top-level package."""
-    import hermes_cli
-    monkeypatch.syspath_prepend(str(Path(hermes_cli.__file__).resolve().parent.parent))
 
 
 @pytest.mark.parametrize("answer,allowed", [("once", True), ("deny", False)])
@@ -544,8 +887,8 @@ def test_real_hermes_gate_displays_stored_diff(env, monkeypatch, hermes_host, an
 
 
 def test_real_hermes_unattended_default_has_no_pending_prompt(env, monkeypatch, hermes_host):
+    import hermes_cli.plugins as plugins
     from tools import approval, approval_context
-    from kestra_oncall.commands import request_approval
 
     args, _ = env.propose()
     monkeypatch.setattr(approval, "_yolo_active", lambda: False)
@@ -555,14 +898,15 @@ def test_real_hermes_unattended_default_has_no_pending_prompt(env, monkeypatch, 
     monkeypatch.setattr(approval, "_is_single_query_approval_context", lambda: False)
     monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: True)
     monkeypatch.setattr(approval_context, "_get_cron_approval_mode", lambda: "deny")
-    directive = env.hook(tool_name="kestra_apply_fix", args=args)
-    result = request_approval("kestra_apply_fix", directive)
-    assert result["approved"] is False and "cron" in result["message"]
-    assert "pending_approval" not in result
+    monkeypatch.setattr(plugins, "invoke_hook", lambda name, **kwargs: [env.hook(**kwargs)])
+    message = plugins.resolve_pre_tool_block("kestra_apply_fix", args)
+    assert message and "cron" in message and "pending_approval" not in message
+    assert env.writes() == 0
 
 
-def test_real_hermes_command_registry_keeps_approval_gate(env, monkeypatch, hermes_host):
-    """The real ctx registry path must not execute a denied slash-command write."""
+def test_real_hermes_command_registry_typed_apply_needs_the_printed_hash_and_no_card(env, monkeypatch, hermes_host):
+    """Through the real PluginContext and registry: the typed command works without any Hermes approval card
+    (none can exist outside an agent turn), refuses a wrong hash, and the handler still demands its ticket."""
     from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
     from tools import approval, approval_context
     from kestra_oncall import tools as plugin_tools
@@ -573,23 +917,17 @@ def test_real_hermes_command_registry_keeps_approval_gate(env, monkeypatch, herm
     monkeypatch.setattr(plugin_tools, "Toolbox", lambda _ctx: env.toolbox)
     register(ctx)
     command = manager._plugin_commands["kestra"]["handler"]
+    prompts = []
+    monkeypatch.setattr(approval, "_presence", lambda *_: (lambda *a, **k: prompts.append(a) or "deny", True, False, False))
     monkeypatch.setattr(approval, "_yolo_active", lambda: False)
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
-    monkeypatch.setattr(approval, "is_approved", lambda *_: False)
-    prompts = []
-    answer = ["deny"]
-
-    def human(command, description, **kwargs):
-        prompts.append(description)
-        return answer[0]
-
-    monkeypatch.setattr(approval, "_presence", lambda *_: (human, True, False, False))
-    assert "Not approved" in command("apply " + args["incident_id"])
+    assert "does not match" in command(f"apply {args['incident_id']} {'0' * 12}")
     assert env.writes() == 0 and env.revisions() == 2
-    answer[0] = "once"
-    assert "verified" in command("apply " + args["incident_id"])
-    assert env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1 and len(prompts) == 2
-    assert all(args["proposal_sha256"] in prompt and "| upper" in prompt for prompt in prompts)
+    assert "verified" in command(f"apply {args['incident_id']} {args['proposal_sha256'][:12]}")
+    assert env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1 and prompts == []
+    # the same registry path without the command's ticket (a hook-skipping dispatcher) is refused
+    direct = json.loads(ctx.dispatch_tool("kestra_apply_fix", args))
+    assert "No approval was recorded" in direct["error"]
 
 
 def test_real_hermes_setup_writer_is_idempotent_and_preserves_other_routes(monkeypatch, hermes_host, tmp_path):

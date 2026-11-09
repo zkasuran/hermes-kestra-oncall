@@ -16,9 +16,11 @@ import urllib.request
 from ruamel.yaml import YAML
 
 ROOT = Path(__file__).resolve().parents[1]
-HOME = Path('/home/asuran/hko-rig/hermes-home')
-RUN = Path('/home/asuran/hko-rig/run')
-HERMES = Path('/home/asuran/hko-rig/hermes-agent')
+# Defaults are the main rig; export HKO_RIG_HOME / HKO_HERMES_DIR / HKO_RIG_RUN to run a second Hermes
+# checkout (for example v0.23.0) with its own home. Only one gateway may own webhook port 28644 at a time.
+HOME = Path(os.environ.get('HKO_RIG_HOME', '/home/asuran/hko-rig/hermes-home'))
+RUN = Path(os.environ.get('HKO_RIG_RUN', '/home/asuran/hko-rig/run'))
+HERMES = Path(os.environ.get('HKO_HERMES_DIR', '/home/asuran/hko-rig/hermes-agent'))
 PYTHON = HERMES / '.venv/bin/python'
 SECRETS = Path('/home/asuran/hko-rig/secrets/kestra.env')
 
@@ -151,3 +153,33 @@ class API:
                                        'sort': 'state.startDate:desc'})
         result = self.request('GET', self.prefix + '/executions/search?' + query)
         return [row for row in result['results'] if row['namespace'] == namespace and row['flowId'] == flow_id]
+
+
+RIG_NAMESPACES = "['hko.demo', 'hko.e2e']"
+RIG_KESTRA_URL = 'http://127.0.0.1:28090'
+
+
+def render_forwarder(source: str, *, flow_id: str = 'hermes_oncall_forwarder', namespace: str = 'hko.system',
+                     namespaces: str = RIG_NAMESPACES, url: str = RIG_KESTRA_URL, disabled: bool = False) -> str:
+    """Turn the shipped forwarder into the rig copy by editing only its marked places, id and namespace.
+
+    Each edited line must exist exactly once, so a change to the shipped file cannot be silently skipped.
+    """
+    edits = [('id: hermes_oncall_forwarder\n', f'id: {flow_id}\n'),
+             ('namespace: ops\n', f'namespace: {namespace}\n'),
+             ("{% for p in ['CHANGE_ME'] %}", "{% for p in " + namespaces + " %}"),
+             ('  kestra_public_url: "https://kestra.example.com"\n', f'  kestra_public_url: "{url}"\n'),
+             ('disabled: false\n', f'disabled: {"true" if disabled else "false"}\n')]
+    for old, new in edits:
+        if source.count(old) != 1:
+            raise RuntimeError(f'forwarder template line missing or repeated: {old.strip()!r}')
+        source = source.replace(old, new)
+    return source
+
+
+def render_fixture(source: str) -> str:
+    """The shipped demo flows use namespaces `demo` and `demo_lookalike`; the rig runs them as hko.* ones."""
+    for old, new in (('namespace: demo_lookalike\n', 'namespace: hko.lookalike\n'), ('namespace: demo\n', 'namespace: hko.demo\n')):
+        if source.count(old) == 1:
+            return source.replace(old, new)
+    raise RuntimeError('fixture has neither namespace: demo nor namespace: demo_lookalike')

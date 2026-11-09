@@ -1,5 +1,5 @@
 id: refund_approval
-namespace: hko.demo
+namespace: demo
 description: Approve a deterministic 12.50 refund for order A100.
 tasks:
   - id: refund_request

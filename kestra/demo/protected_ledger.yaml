@@ -1,5 +1,5 @@
 id: protected_ledger
-namespace: hko.demo
+namespace: demo
 description: Protected accounting ledger. Diagnose only, never patch or replay.
 tasks:
   - id: ledger_guard

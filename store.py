@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS locks (
 );
 """
 
+KEEP_PROPOSALS = 5   # per incident; the latest is the only one apply accepts, older ones are history
+
 _INCIDENT_FIELDS = {"status", "failed_task_id", "failed_task_run_id", "execution_revision", "apply_state",
                     "result", "bundle"}
 _JSON_FIELDS = {"bundle", "apply_state", "result"}
@@ -95,8 +97,24 @@ class Store:
                     self._conn.execute(statement)
 
     def close(self) -> None:
+        """Close the connection only if this Store opened it. A connection handed in stays the caller's."""
         if self._owns:
-            self._conn.close()
+            try:
+                self._conn.close()
+            except sqlite3.Error:
+                pass
+
+    def __enter__(self) -> "Store":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def __del__(self) -> None:  # last resort so a forgotten Store never leaks its file handle
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------ helpers
     def _all(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
@@ -164,6 +182,16 @@ class Store:
         sql += " ORDER BY created DESC, incident_id LIMIT ?"
         return self._all(sql, (*params, max(1, min(int(limit), 200))))
 
+    def find_related(self, *, namespace: str, flow_id: str, failed_task_id: str | None, since: float,
+                     statuses: tuple[str, ...], exclude: str) -> dict[str, Any] | None:
+        """The newest still-active incident for the same flow and failed task, if one was opened after `since`."""
+        marks = ",".join("?" for _ in statuses)
+        return self._one(
+            "SELECT incident_id, status, created, (SELECT COUNT(*) FROM proposals p WHERE p.incident_id = i.incident_id) "
+            f"AS proposals FROM incidents i WHERE namespace = ? AND flow_id = ? AND failed_task_id IS ? AND created > ? "
+            f"AND incident_id != ? AND status IN ({marks}) ORDER BY created DESC LIMIT 1",
+            (namespace, flow_id, failed_task_id, since, exclude, *statuses))
+
     def counts_by_status(self) -> dict[str, int]:
         return {r["status"]: r["n"] for r in self._all("SELECT status, COUNT(*) AS n FROM incidents GROUP BY status")}
 
@@ -178,6 +206,10 @@ class Store:
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (incident_id, proposal_sha256, base_revision, base_source_sha256, base_source, new_source,
                  rationale, diff, json.dumps(diff_stat), json.dumps(validation), time.time()))
+            self._conn.execute(
+                "DELETE FROM proposals WHERE incident_id = ? AND rowid NOT IN "
+                "(SELECT rowid FROM proposals WHERE incident_id = ? ORDER BY created DESC, rowid DESC LIMIT ?)",
+                (incident_id, incident_id, KEEP_PROPOSALS))
         proposal = self.get_proposal(incident_id, proposal_sha256)
         assert proposal is not None
         return proposal

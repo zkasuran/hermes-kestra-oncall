@@ -1,0 +1,12 @@
+<!doctype html><meta charset=utf-8><style>
+*{box-sizing:border-box}body{margin:0;width:1200px;height:600px;background:#041c1c;color:#ffe6cb;font:20px/1.4 Inter,system-ui,sans-serif;position:relative;overflow:hidden}
+.wrap{padding:70px 80px}h1{font-size:62px;line-height:1.05;margin:0 0 18px;letter-spacing:-.01em}
+p{margin:0;color:#8fb0a8;font-size:25px;max-width:860px}
+.flow{position:absolute;left:80px;right:80px;bottom:80px;display:flex;align-items:center;gap:14px;font:18px ui-monospace,monospace}
+.t{border:1px solid #1d4545;background:#0a2a2a;border-radius:10px;padding:12px 18px;min-width:150px;text-align:center}
+.ok{border-color:#3fb27f;color:#3fb27f}.bad{border-color:#e5534b;color:#e5534b}.fix{border-color:#d9a441;color:#d9a441}
+.ar{color:#8fb0a8}.lab{position:absolute;left:80px;bottom:30px;color:#8fb0a8;font-size:15px}
+</style><div class=wrap><h1>Kestra On-Call<br>for Hermes Agent</h1>
+<p>Hermes reads the failure, proposes the fix, asks once, replays from the failed task.</p></div>
+<div class=flow><div class="t ok">extract</div><span class=ar>&rarr;</span><div class="t bad">transform failed</div><span class=ar>&rarr;</span><div class="t fix">one approval</div><span class=ar>&rarr;</span><div class="t ok">transform replayed</div><span class=ar>&rarr;</span><div class="t ok">load</div></div>
+<div class=lab>extract is reused, not run again</div>

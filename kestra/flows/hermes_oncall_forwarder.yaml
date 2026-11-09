@@ -1,42 +1,69 @@
 id: hermes_oncall_forwarder
-namespace: hko.system
+namespace: ops
 description: |
-  Forward a failed execution in an allowed namespace (hko.demo, hko.e2e and their children) to the
-  Hermes webhook route kestra-oncall. Lives in hko.system, which is not allowed, so a failure of this
-  flow can never trigger itself. Hermes drops a repeated X-Request-ID, so the retry is safe.
-disabled: true
+  Deploy it in a namespace that your pattern below does not match (here: ops).
+
+  Sends every FAILED execution in the namespaces you choose to the Hermes webhook route kestra-oncall,
+  so Hermes can read the failure and propose a fix. Deploy this flow after editing the TWO marked
+  places below (the namespace list in the trigger and kestra_public_url). Nothing else needs to change.
+
+  Secrets (Kestra Settings > Secrets, or the OSS environment secrets):
+    HERMES_WEBHOOK_URL    full URL of the Hermes route, for example https://hermes.example.com/webhooks/kestra-oncall
+    HERMES_WEBHOOK_TOKEN  the same value as WEBHOOK_SECRET in the Hermes profile (sent as X-Gitlab-Token)
+
+  Safety: with the placeholder namespace below it forwards nothing. It never forwards a failure that happened in its
+  own namespace, even if your pattern matches it, so it cannot loop. Hermes drops a repeated X-Request-ID
+  (the failed execution id), so the bounded retry cannot create a second Hermes run.
+
+variables:
+  # ---- EDIT 2 of 2: the address people use to open Kestra (shown to the model, never called) -----
+  kestra_public_url: "https://kestra.example.com"
+
+disabled: false
+
 tasks:
-  - id: notify_hermes
-    type: io.kestra.plugin.core.http.Request
-    uri: "{{ secret('HERMES_WEBHOOK_URL') }}"
-    method: POST
-    contentType: application/json
-    headers:
-      X-Gitlab-Token: "{{ secret('HERMES_WEBHOOK_TOKEN') }}"
-      X-Request-ID: "{{ trigger.executionId }}"
-    options:
-      timeout:
-        connectTimeout: PT5S
-        readIdleTimeout: PT30S
-    retry:
-      type: constant
-      interval: PT5S
-      maxAttempts: 3
-    body: |
-      {
-        "event_type": "kestra.execution.failed",
-        "execution_id": "{{ trigger.executionId }}",
-        "namespace": "{{ trigger.namespace }}",
-        "flow_id": "{{ trigger.flowId }}",
-        "flow_revision": {{ trigger.flowRevision }},
-        "state": "{{ trigger.state }}",
-        "started": "{{ trigger.startDate }}",
-        "ended": "{{ trigger.endDate }}",
-        "kestra_url": "http://127.0.0.1:28090"
-      }
+  - id: skip_own_namespace
+    type: io.kestra.plugin.core.flow.If
+    # In task context flow.namespace is THIS flow's namespace and trigger.namespace the failed flow's.
+    condition: "{{ trigger.namespace != flow.namespace }}"
+    then:
+      - id: notify_hermes
+        type: io.kestra.plugin.core.http.Request
+        uri: "{{ secret('HERMES_WEBHOOK_URL') }}"
+        method: POST
+        contentType: application/json
+        headers:
+          X-Gitlab-Token: "{{ secret('HERMES_WEBHOOK_TOKEN') }}"
+          X-Request-ID: "{{ trigger.executionId }}"
+        options:
+          timeout:
+            connectTimeout: PT5S
+            readIdleTimeout: PT30S
+        retry:
+          type: constant
+          interval: PT5S
+          maxAttempts: 3
+        body: |
+          {
+            "event_type": "kestra.execution.failed",
+            "execution_id": "{{ trigger.executionId }}",
+            "namespace": "{{ trigger.namespace }}",
+            "flow_id": "{{ trigger.flowId }}",
+            "flow_revision": {{ trigger.flowRevision }},
+            "state": "{{ trigger.state }}",
+            "started": "{{ trigger.startDate }}",
+            "ended": "{{ trigger.endDate }}",
+            "kestra_url": "{{ vars.kestra_public_url }}"
+          }
+
 triggers:
   - id: allowed_failure
     type: io.kestra.plugin.core.trigger.Flow
     states: [FAILED]
     allowConcurrent: true
-    when: "{{ flow.namespace == 'hko.demo' or (flow.namespace | startsWith('hko.demo.')) or flow.namespace == 'hko.e2e' or (flow.namespace | startsWith('hko.e2e.')) }}"
+    # ---- EDIT 1 of 2: which namespaces to forward ---------------------------------------------------
+    # Replace ONLY the list inside the first pair of brackets. Each entry matches that namespace and all
+    # its children, never a namesake like "prod2". Keep it in step with the plugin setting "namespaces"
+    # in Hermes. Example: ['prod', 'staging.eu'].
+    # (Kestra 2.0.9 does not make flow variables available in a trigger condition, so the list lives here.)
+    when: "{% for p in ['CHANGE_ME'] %}{% if flow.namespace == p or (flow.namespace | startsWith(p ~ '.')) %}true{% endif %}{% endfor %}"

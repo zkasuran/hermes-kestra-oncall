@@ -1,5 +1,5 @@
 id: orders_etl
-namespace: hko.lookalike
+namespace: demo_lookalike
 description: Outside the allowed namespaces. Must never trigger on-call.
 tasks:
   - id: transform

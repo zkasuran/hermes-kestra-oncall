@@ -17,28 +17,34 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'rig'))
-from common import API, HERMES, HOME, save_json  # noqa: E402
+from common import API, HERMES, HOME, RUN, save_json  # noqa: E402
 
 PLUGIN_FILES = ['__init__.py', 'plugin.yaml', 'settings.py', 'tools.py', 'hooks.py', 'commands.py', 'cli.py',
                 'client.py', 'store.py', 'flowsrc.py', 'incidents.py', 'pauses.py', 'skills/kestra-oncall/SKILL.md']
-RIG_FILES = ['kestra/flows/hermes_oncall_forwarder.yaml', 'kestra/flows/secret_probe.yaml',
+RIG_FILES = ['kestra/flows/hermes_oncall_forwarder.yaml', 'rig/flows/secret_probe.yaml',
              'kestra/demo/orders_etl.yaml', 'kestra/demo/refund_approval.yaml', 'kestra/demo/healthy_report.yaml',
-             'kestra/demo/protected_ledger.yaml', 'kestra/demo/lookalike_orders.yaml',
-             'rig/common.py', 'rig/hermes_home.py', 'rig/deps.py', 'rig/seed.py', 'rig/reset.py', 'rig/up.sh',
+             'kestra/demo/protected_ledger.yaml', 'kestra/demo/demo_lookalike.yaml',
+             'rig/common.py', 'rig/env.example', 'rig/flows/secret_probe.yaml', 'release/export.sh', 'tests/e2e/pty_cli.py', 'rig/hermes_home.py', 'rig/deps.py', 'rig/seed.py', 'rig/reset.py', 'rig/up.sh',
              'rig/down.sh', 'rig/status.sh', 'rig/seed.sh', 'rig/reset.sh', 'rig/_env.sh',
              'tests/e2e/run_e2e.py', 'tests/e2e/hermes_driver.py', 'evidence/make_manifest.py']
 GAPS = [
-    'The human approval prompt is answered by a scripted callback registered through Hermes terminal_tool.set_approval_callback; '
-    'the real approval gate, hook and registry run, but no person clicked a TUI or chat card in this run.',
-    'The model-driven webhook run (S1) depends on a shared LLM pool that rate-limits gpt-6-astra; the run fell back to gpt-6.1-sol '
-    'when the primary was limited (see the gateway log lines in evidence/logs).',
-    'S4 to S6 use scripted proposals (not model written) on hko.e2e copies of orders_etl, with the forwarder paused for those scenarios, '
-    'so the model cannot race the scripted proposal. S1 to S3 use the model proposal on hko.demo.orders_etl.',
-    'S6 simulates the interruption by killing the apply process at the replay call (fault injected by the test driver into '
-    'KestraClient.replay); a power loss or SIGKILL at other points is not exercised.',
+    'The approval a person gives is the typed command (/kestra apply <id> <hash>, resume, kill). It was run through the plugin command handler, '
+    'in a telegram-like session with no approval notifier (S10) and typed into the real terminal UI in a pseudo-terminal (S12). No live Telegram, '
+    'Discord or Slack client was used, and no person clicked a Hermes approval card: the answer to the card on the model tool path (deny or once) is scripted '
+    'through terminal_tool.set_approval_callback, with the card text captured and asserted.',
+    'The model-driven webhook run (S1) depends on a shared LLM pool that rate-limits gpt-6-astra; the run falls back to gpt-6.1-sol or gpt-5.6-sol '
+    'when the primary is limited (see evidence/logs/gateway_model_tools.txt). The proposal text is the model\'s and can differ between runs.',
+    'S4 to S6 and S8 to S12 use scripted proposals (not model written) on hko.e2e copies, with the forwarder paused for those scenarios so the model cannot race them. '
+    'S1 to S3 use the model proposal on hko.demo.orders_etl.',
+    'S6 simulates the interruption by killing the apply process at the replay call (fault injected by the test driver into KestraClient.replay); '
+    'a power loss or SIGKILL at other points is covered only by the unit tests of core.',
     'Concurrent apply (S8) uses two processes on one machine sharing one SQLite store; separate hosts with separate stores would not share the lock.',
-    'Hermes v0.23.0 was not used for the live run (validate and doctor on v0.23.0 are recorded by agent glue).',
-    'Kestra OSS with basic auth only; EE namespaces, RBAC and API tokens are untested.',
+    'Hermes v0.23.0 ran S1, S1b, S2 and S3 only (evidence/v023-results.json); the other scenarios ran on Hermes main only.',
+    'Kestra OSS with basic auth only; Enterprise namespaces, RBAC and API tokens are untested. Kestra 2.0.9 only.',
+    'The README quick start check (evidence/quickstart-check.json) substitutes a local plugin path for the GitHub install line, --deliver log for a chat bot, '
+    'a model block written into config.yaml, and rig/deps.py for the aiohttp requirement.',
+    'Observed Kestra limits, not defects of the plugin: a failed Loop cannot be replayed by Kestra 2.0.9 (diagnose only); a tolerated failure (allowFailure) '
+    'ends the replay WARNING and is handed to a human, not called verified.',
 ]
 
 
@@ -55,7 +61,7 @@ def collect_ids(results: dict) -> dict:
 
 def save_gateway_excerpt() -> None:
     """Model tool calls and fallback decisions from the gateway log (no payloads, no credentials)."""
-    log = Path('/home/asuran/hko-rig/run/gateway.log')
+    log = RUN / 'gateway.log'
     keep = ('agent.tool_executor: tool kestra_', 'Fallback activated', 'webhook_coalesce', 'POST /webhooks/kestra-oncall', 'webhook] Skipping duplicate')
     lines = [l[:300] for l in log.read_text(errors='replace').splitlines() if any(k in l for k in keep)] if log.exists() else []
     out = ROOT / 'evidence/logs/gateway_model_tools.txt'
@@ -63,7 +69,21 @@ def save_gateway_excerpt() -> None:
     out.write_text('\n'.join(lines) + '\n')
 
 
+def git_state() -> dict:
+    """Commit and tree of the code that was tested, and whether any tracked file differs from it."""
+    def run(*a):
+        return subprocess.run(['git', *a], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    dirty = [l for l in run('status', '--porcelain', '--untracked-files=no', '--', '.', ':!evidence', ':!.work').splitlines() if l]
+    return {'commit': run('rev-parse', 'HEAD'), 'tree': run('rev-parse', 'HEAD^{tree}'), 'dirty_tracked_files': dirty,
+            'branch': run('rev-parse', '--abbrev-ref', 'HEAD'), 'commit_subject': run('log', '-1', '--format=%s')}
+
+
 def main() -> None:
+    allow_dirty = '--allow-dirty' in sys.argv
+    state = git_state()
+    if state['dirty_tracked_files'] and not allow_dirty:
+        raise SystemExit('refusing: tracked files differ from HEAD, so the evidence would not describe a commit:\n  '
+                         + '\n  '.join(state['dirty_tracked_files']) + '\nCommit, rerun the e2e, then run this again (or --allow-dirty for a draft).')
     save_gateway_excerpt()
     api = API()
     results_path = ROOT / 'evidence/e2e-results.json'
@@ -82,11 +102,11 @@ def main() -> None:
     git = lambda *a: subprocess.run(['git', *a], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     manifest = {
         'generated': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+        'tested_commit': state,
+        'draft': bool(state['dirty_tracked_files']),
         'versions': {
             'kestra': api.request('GET', '/api/v1/configs')['version'],
             'hermes_commit': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=HERMES, capture_output=True, text=True).stdout.strip(),
-            'plugin_repo_head': git('rev-parse', 'HEAD'),
-            'plugin_repo_dirty_files': git('status', '--short').count('\n') + (1 if git('status', '--short') else 0),
             'model': 'gpt-6-astra (fallbacks gpt-6.1-sol, gpt-5.6-sol) via the local OpenAI-compatible pool, Responses API',
         },
         'files_sha256': {rel: sha(ROOT / rel) for rel in PLUGIN_FILES + RIG_FILES if (ROOT / rel).exists()},

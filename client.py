@@ -122,10 +122,14 @@ class KestraClient:
     def search_executions(self, *, namespace: str | None = None, flow_id: str | None = None,
                           state: list[str] | None = None, size: int = 25,
                           sort: str = "state.startDate:desc",
-                          labels: dict[str, str] | None = None) -> list[dict]:
-        query: list[tuple[str, str]] = [("size", str(size)), ("page", "1"), ("sort", sort)]
+                          labels: dict[str, str] | None = None, namespace_prefix: str | None = None,
+                          page: int = 1) -> list[dict]:
+        query: list[tuple[str, str]] = [("size", str(size)), ("page", str(page)), ("sort", sort)]
         if namespace:
             query.append(("filters[namespace][EQUALS]", namespace))
+        if namespace_prefix:
+            # PREFIX matches the namespace itself and its children on a dot boundary (measured on 2.0.9).
+            query.append(("filters[namespace][PREFIX]", namespace_prefix))
         if flow_id:
             query.append(("filters[flowId][EQUALS]", flow_id))
         if state:

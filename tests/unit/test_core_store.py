@@ -26,6 +26,13 @@ def test_schema_is_idempotent_and_works_with_path_or_connection(tmp_path):
     assert make_incident(shared)[1] is True
     conn.execute("CREATE TABLE glue_other (x)")           # foreign tables on the same connection coexist
     assert shared.get_incident_row("INC-00000001")["bundle"] == {"x": 1}
+    shared.close()                                        # not owned: must leave the caller's connection open
+    assert conn.execute("SELECT 1").fetchone() == (1,)
+    conn.close()
+    with Store(tmp_path / "ctx.db") as ctx_store:        # owned connection is closed by the context manager
+        make_incident(ctx_store)
+    with pytest.raises(sqlite3.ProgrammingError):
+        ctx_store.get_incident_row("INC-00000001")
 
 
 def test_incident_insert_is_once_and_updates_validate_fields(tmp_path):

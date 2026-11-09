@@ -17,6 +17,8 @@ from .incidents import Policy, PolicyError, StaleError, _state, iso
 from .store import Store
 
 SETTLE_TIMEOUT_S = 30.0
+PAUSE_PAGE_SIZE = 100
+MAX_PAUSE_PAGES = 5
 
 
 def _seconds_since(date: str | None) -> int | None:
@@ -41,6 +43,7 @@ class PauseDesk:
         self.client = client
         self.store = store
         self.policy = policy
+        self.last_truncated = False
 
     # ----------------------------------------------------------------- read
     def _pause_tasks(self, namespace: str, flow_id: str, revision: int | None,
@@ -59,9 +62,8 @@ class PauseDesk:
         revision = execution.get("flowRevision")
         pauses = self._pause_tasks(namespace, flow_id, revision, cache)
         rows = []
-        for run in execution.get("taskRunList") or []:
-            if _state(run) != "PAUSED":
-                continue
+        paused_runs = [r for r in execution.get("taskRunList") or [] if _state(r) == "PAUSED"]
+        for run in paused_runs:
             task = pauses.get(run.get("taskId"))
             inputs = execution.get("inputs") or {}
             rows.append({
@@ -75,18 +77,33 @@ class PauseDesk:
                 "labels": {l.get("key"): l.get("value") for l in execution.get("labels") or []
                            if not str(l.get("key", "")).startswith("system.")},
                 "protected": self.policy.is_protected(namespace, flow_id),
+                # Kestra's resume takes no task run id: with several paused task runs it acts on the execution.
+                "paused_task_run_count": len(paused_runs), "ambiguous": len(paused_runs) > 1,
             })
         return rows
 
     def list_pauses(self) -> list[dict]:
+        """PAUSED executions in allowed namespaces. The search is filtered per allowed prefix on the server (so pauses
+        elsewhere cannot push ours off the first page) and paged up to a hard cap; `self.last_truncated` says if the cap hit."""
+        self.last_truncated = False
         if not self.policy.namespaces:
             return []  # fail closed: nothing is allowed, so nothing is listed
         rows: list[dict] = []
         cache: dict[tuple, dict[str, PauseTask]] = {}
-        for light in self.client.search_executions(state=["PAUSED"], size=100):
-            if not self.policy.namespace_allowed(light.get("namespace", "")):
-                continue
-            rows.extend(self._rows_for(self.client.get_execution(light["id"]), cache))
+        seen: set[str] = set()
+        prefixes = sorted({p.strip().rstrip(".") for p in self.policy.namespaces if p and p.strip().strip(".")})
+        for prefix in prefixes:
+            for page in range(1, MAX_PAUSE_PAGES + 1):
+                batch = self.client.search_executions(state=["PAUSED"], size=PAUSE_PAGE_SIZE, namespace_prefix=prefix, page=page)
+                for light in batch:
+                    if light["id"] in seen or not self.policy.namespace_allowed(light.get("namespace", "")):
+                        continue
+                    seen.add(light["id"])
+                    rows.extend(self._rows_for(self.client.get_execution(light["id"]), cache))
+                if len(batch) < PAUSE_PAGE_SIZE:
+                    break
+            else:
+                self.last_truncated = True
         return rows
 
     # ----------------------------------------------------------------- decide
@@ -146,6 +163,11 @@ class PauseDesk:
                              f"(now {_state(execution)}, task run state {found}). Nothing was written. "
                              "Refresh the pauses list and ask again.")
 
+        paused_count = sum(1 for r in execution.get("taskRunList") or [] if _state(r) == "PAUSED")
+        if action == "resume" and paused_count > 1:
+            raise PolicyError(f"This execution has {paused_count} paused task runs; Kestra's resume applies to the whole "
+                              "execution, not to one task run, so the exact task run cannot be enforced. Resolve it in the "
+                              "Kestra UI. (kill is still possible and ends the whole execution.)")
         if action == "resume":
             declared = self._declared_inputs(namespace, flow_id, execution.get("flowRevision"), run.get("taskId"))
             unknown = sorted(set(inputs) - {d["id"] for d in declared})
@@ -211,6 +233,8 @@ class PauseDesk:
             "namespace": execution.get("namespace"), "flow_id": execution.get("flowId"),
             "adopted_interrupted_decision": adopted, "noop": False,
         }
+        if action == "kill":
+            result["message"] = "Kill ends the whole execution, not only this task run."
         if pending:
             result["message"] = "Kestra accepted the request but the task is still PAUSED; check again shortly."
             return result  # leave the intent open: calling again reconciles

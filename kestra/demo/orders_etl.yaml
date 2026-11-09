@@ -1,5 +1,5 @@
 id: orders_etl
-namespace: hko.demo
+namespace: demo
 description: A supplier renamed amount to total_amount in the daily order CSV.
 tasks:
   - id: extract
