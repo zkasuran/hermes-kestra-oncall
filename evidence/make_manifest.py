@@ -36,7 +36,7 @@ GAPS = [
     'so the model cannot race the scripted proposal. S1 to S3 use the model proposal on hko.demo.orders_etl.',
     'S6 simulates the interruption by killing the apply process at the replay call (fault injected by the test driver into '
     'KestraClient.replay); a power loss or SIGKILL at other points is not exercised.',
-    'Two simultaneous applies of the same incident were not run in this pass; the lock row is proven only through the interrupted-apply busy answer.',
+    'Concurrent apply (S8) uses two processes on one machine sharing one SQLite store; separate hosts with separate stores would not share the lock.',
     'Hermes v0.23.0 was not used for the live run (validate and doctor on v0.23.0 are recorded by agent glue).',
     'Kestra OSS with basic auth only; EE namespaces, RBAC and API tokens are untested.',
 ]
@@ -53,7 +53,18 @@ def collect_ids(results: dict) -> dict:
     return ids
 
 
+def save_gateway_excerpt() -> None:
+    """Model tool calls and fallback decisions from the gateway log (no payloads, no credentials)."""
+    log = Path('/home/asuran/hko-rig/run/gateway.log')
+    keep = ('agent.tool_executor: tool kestra_', 'Fallback activated', 'webhook_coalesce', 'POST /webhooks/kestra-oncall', 'webhook] Skipping duplicate')
+    lines = [l[:300] for l in log.read_text(errors='replace').splitlines() if any(k in l for k in keep)] if log.exists() else []
+    out = ROOT / 'evidence/logs/gateway_model_tools.txt'
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text('\n'.join(lines) + '\n')
+
+
 def main() -> None:
+    save_gateway_excerpt()
     api = API()
     results_path = ROOT / 'evidence/e2e-results.json'
     results = json.loads(results_path.read_text()) if results_path.exists() else None

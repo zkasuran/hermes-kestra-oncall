@@ -64,6 +64,12 @@ def _identity(record: dict) -> str:
         return "flow details unavailable"
 
 
+def _counts(summary: dict) -> str:
+    counts = summary.get("incidents") or {}
+    parts = ", ".join(f"{n} {status}" for status, n in sorted(counts.items())) or "none"
+    return f"Incidents: {parts}. Pause decisions: {summary.get('pause_decisions', 0)}."
+
+
 class Commands:
     def __init__(self, ctx: Any, toolbox: Any, hook: Any, *, approval: Callable = request_approval):
         self.ctx, self.toolbox, self.hook, self.approval = ctx, toolbox, hook, approval
@@ -102,13 +108,13 @@ class Commands:
                 return _error(result)
             status = f"Kestra {result.get('version', '')}: " + ("connected" if result.get("connected") else "unavailable")
             policy = "policy ready" if result.get("policy_ready") else "no namespaces allowed; configure namespaces first"
-            return f"{status}\n{policy}\nIncidents: {json.dumps(result.get('summary', {}), ensure_ascii=True)}"
+            return f"{status}\n{policy}\n{_counts(result.get('summary', {}))}"
         if verb == "incidents":
             result = self._read("kestra_incidents", {"limit": 10})
             if _error(result):
                 return _error(result)
             rows = result.get("incidents", [])
-            return "\n".join(f"{row.get('incident_id') or row.get('id')}  {row.get('status', '?')}  {_identity(row)}" for row in rows) or "No incidents."
+            return "\n".join(f"{row['incident_id']}  {row.get('status', '?')}  {_identity(row)}" for row in rows) or "No incidents."
         if verb in {"show", "apply"}:
             result = self._read("kestra_incidents", {"incident_id": command["id"]})
             if _error(result):
@@ -120,8 +126,13 @@ class Commands:
                     text += (f"\nBase revision {proposal.get('base_revision')}\n{proposal.get('rationale', '')}"
                              f"\n{proposal.get('diff', '')[:1600]}\nSHA-256: {proposal.get('proposal_sha256', '')}"
                              f"\n/kestra apply {command['id']}")
+                elif result.get("protected"):
+                    text += "\nProtected flow: diagnose only, no fix can be proposed."
                 else:
                     text += "\nNo proposal yet. Ask Hermes to inspect the incident and propose a fix."
+                outcome = result.get("result") or {}
+                if outcome:
+                    text += f"\nResult: {outcome.get('status', '?')}. {str(outcome.get('message', ''))[:300]}"
                 return text
             sha = proposal.get("proposal_sha256")
             if not sha:
@@ -133,12 +144,12 @@ class Commands:
             return _error(result)
         rows = result.get("pauses", [])
         if verb == "pauses":
-            return "\n".join(f"{row.get('execution_id') or row.get('id')}  {_identity(row)}\n{str(row.get('description') or row.get('pause_description') or '')[:180]}" for row in rows[:10]) or "No paused executions."
-        matches = [row for row in rows if (row.get("execution_id") or row.get("id")) == command["id"]]
+            return "\n".join(f"{row['execution_id']}  {_identity(row)}\n{str(row.get('description') or '')[:180]}" for row in rows[:10]) or "No paused executions."
+        matches = [row for row in rows if row["execution_id"] == command["id"]]
         if len(matches) != 1:
             return "No unique current pause for that execution. Run /kestra pauses and use its execution id."
         pause = matches[0]
-        task_run = pause.get("paused_task_run_id") or pause.get("task_run_id") or pause.get("taskRunId")
+        task_run = pause["paused_task_run_id"]
         decision = self._write("kestra_pause_decide", {
             "execution_id": command["id"], "paused_task_run_id": task_run,
             "action": "resume" if verb == "resume" else "kill", "inputs": command.get("inputs", {}),

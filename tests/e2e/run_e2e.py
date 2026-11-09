@@ -308,6 +308,57 @@ def s1_detect(api: API, state: dict) -> Scenario:
     return sc
 
 
+# ---------------------------------------------------------------- S1b webhook hardening and no loops
+
+def s1b_hardening(api: API, state: dict) -> Scenario:
+    sc = Scenario('S1b', 'webhook hardening: wrong token rejected, duplicate delivery ignored, a failure of the forwarder namespace never loops')
+    import urllib.error
+    import urllib.request
+    from common import env_file, SECRETS
+    token = env_file(SECRETS)['HKO_WEBHOOK_TOKEN']
+    url = 'http://10.250.90.1:28644/webhooks/kestra-oncall'
+    s1 = state.get('s1')
+    if not s1:
+        sc.check('S1 provided an execution id', False, 'run S1 first')
+        return sc
+    body = json.dumps({'event_type': 'kestra.execution.failed', 'execution_id': s1['execution_id'], 'namespace': 'hko.demo',
+                       'flow_id': 'orders_etl', 'flow_revision': 1, 'state': 'FAILED'}).encode()
+
+    def post(header_token: str | None, request_id: str):
+        headers = {'Content-Type': 'application/json', 'X-Request-ID': request_id}
+        if header_token is not None:
+            headers['X-Gitlab-Token'] = header_token
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=headers, method='POST'), timeout=15) as r:
+                return r.status, json.loads(r.read() or b'{}')
+        except urllib.error.HTTPError as exc:
+            return exc.code, {}
+
+    status, _ = post('not-the-token', 'e2e-bad-token')
+    sc.check('wrong token is rejected (401)', status == 401, status)
+    status, _ = post(None, 'e2e-no-token')
+    sc.check('missing token is rejected (401)', status == 401, status)
+    status, payload = post(token, s1['execution_id'])
+    sc.check('same delivery id as the real forward is ignored as duplicate (no second Hermes run)', status == 200 and payload.get('status') == 'duplicate', {'status': status, 'payload': payload})
+
+    # a failure inside hko.system (the forwarder's own namespace) must not trigger the forwarder
+    ns, fid = 'hko.system', 'rig_selffail'
+    probe = 'id: rig_selffail\nnamespace: hko.system\ntasks:\n  - id: boom\n    type: io.kestra.plugin.core.execution.Fail\n    errorMessage: forwarder-namespace failure, must not loop\n'
+    api.deploy(probe)
+    try:
+        before = len(api.executions(*FORWARDER))
+        failed = api.wait(api.trigger(ns, fid)['id'])
+        time.sleep(15)
+        after = len(api.executions(*FORWARDER))
+        sc.check('a FAILED execution in hko.system does not fire the forwarder', failed['state']['current'] == 'FAILED' and after == before, {'before': before, 'after': after})
+        sc.ids['selffail_execution'] = failed['id']
+    finally:
+        for row in api.executions(ns, fid):
+            api.request('DELETE', api.prefix + '/executions/' + row['id'])
+        api.request('DELETE', api.prefix + f'/flows/{ns}/{fid}')
+    return sc
+
+
 # ---------------------------------------------------------------- S2 approve and repair, S3 idempotent retry
 
 def s2_repair(api: API, state: dict) -> Scenario:
@@ -475,7 +526,10 @@ def s6_resume(api: API, state: dict) -> Scenario:
     res = drive('command', f'apply {incident_id}', answer='once')
     out = json.dumps(res['output'])
     sc.check('resumed apply verified', f'{incident_id}: verified' in str(res['output']), out[:400])
-    sc.check('adopted the existing write (no second update)', '"adopted_existing_write": true' in out, out[:600])
+    steps = journal_steps(incident_id)
+    # 'replay' is the intent entry written before the client call; the killed process wrote one, the resume wrote one.
+    sc.check('resumed from the persisted step: one write_fix, one fix_written, one replay_started in the whole journal (no second update, no second replay)',
+             steps.count('write_fix') == 1 and steps.count('fix_written') == 1 and steps.count('replay_started') == 1 and steps[-1] == 'verified', steps)
     sc.check('flow revision unchanged since the crash (no extra update)', flow(api, ns, fid)['revision'] == s6['fixed_revision'] and len(revisions(api, ns, fid)) == s6['n_revisions'])
     replays = replays_of(api, ns, fid, s6['original'])
     sc.check('exactly one replay execution', len(replays) == 1, [r['id'] for r in replays])
@@ -548,10 +602,38 @@ def s7_pause(api: API, state: dict) -> Scenario:
     return sc
 
 
+# ---------------------------------------------------------------- S8 concurrent apply
+
+def s8_concurrent(api: API, state: dict) -> Scenario:
+    sc = Scenario('S8', 'concurrent apply: two sessions approve the same proposal at the same moment -> one write, one replay')
+    import concurrent.futures
+    ns, fid = 'hko.e2e', 'e2e_orders_concurrent'
+    deploy_copy(api, ETL_BASE, ns, fid)
+    failed = fail_run(api, ns, fid)
+    incident_id = open_scripted(sc, failed['id'])
+    base = flow(api, ns, fid)
+    proposal = propose_scripted(sc, incident_id, fixed_etl(base['source']), 'e2e S8: two sessions race to apply')
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(drive, 'command', f'apply {incident_id}', answer='once') for _ in range(2)]
+        outs = [f.result() for f in futures]
+    texts = [json.dumps(o['output']) for o in outs]
+    sc.check('both sessions were asked and approved', all(o['approval_calls'] == 1 for o in outs), [o['approval_calls'] for o in outs])
+    sc.check('at least one session reports verified', any(f'{incident_id}: verified' in str(o['output']) for o in outs), [t[:160] for t in texts])
+    sc.check('the other session either waited out (verified/no-op) or reported busy; none errored', all(('verified' in t) or ('busy' in t.lower()) or ('Already' in t) for t in texts), [t[:200] for t in texts])
+    after = flow(api, ns, fid)
+    sc.check('exactly one new flow revision', after['revision'] == base['revision'] + 1 and after['source'] == fixed_etl(base['source']), {'base': base['revision'], 'now': after['revision']})
+    replays = replays_of(api, ns, fid, failed['id'])
+    sc.check('exactly one replay execution', len(replays) == 1, [r['id'] for r in replays])
+    steps = journal_steps(incident_id)
+    sc.check('journal has one write_fix and one replay', steps.count('write_fix') == 1 and steps.count('replay') == 1, steps)
+    sc.ids.update(flow=f'{ns}.{fid}', original_execution=failed['id'], incident=incident_id, replay_execution=replays[0]['id'] if replays else None)
+    return sc
+
+
 # ---------------------------------------------------------------- main
 
-SCENARIOS = [('S1', s1_detect), ('S2', s2_repair), ('S3', s3_idempotent), ('S6a', s6_crash), ('S4', s4_stale),
-             ('S5', s5_rollback), ('S7', s7_pause), ('S6b', s6_resume)]
+SCENARIOS = [('S1', s1_detect), ('S1b', s1b_hardening), ('S2', s2_repair), ('S3', s3_idempotent), ('S6a', s6_crash), ('S4', s4_stale),
+             ('S5', s5_rollback), ('S7', s7_pause), ('S8', s8_concurrent), ('S6b', s6_resume)]
 
 
 def main() -> int:
@@ -576,7 +658,7 @@ def main() -> int:
         for sid, fn in SCENARIOS:
             if only and sid.upper() not in only:
                 continue
-            needs_quiet = sid in ('S4', 'S5', 'S6a', 'S6b')
+            needs_quiet = sid in ('S4', 'S5', 'S6a', 'S6b', 'S8')
             if needs_quiet and not quiet:
                 # Scripted proposals must not race the model: pause the forwarder for hko.e2e scenarios only.
                 set_forwarder(api, False)

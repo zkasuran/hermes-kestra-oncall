@@ -1,46 +1,38 @@
-"""Glue contracts, including adversarial inputs and actual Hermes approval resolution."""
+"""Glue contracts against the real core (Oncall, PauseDesk, Store, KestraClient) and a fake Kestra server.
+
+Only two things are faked: Kestra's HTTP server (core's FakeKestra, which mirrors measured 2.0.9 behaviour)
+and the human's answer in Hermes's approval prompt. Everything between, including settings, the per-call
+runtime, SQLite storage on Hermes's plugin_db, hooks and slash commands, is the production code path.
+"""
 
 from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
-import importlib.util
 import json
-import sqlite3
-import sys
-from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 import jsonschema
 import pytest
 from ruamel.yaml import YAML
+from test_core_support import (BASE_SOURCE, FIXED_SOURCE, FLOW, GOOD_SOURCE, NS, PASSWORD, PAUSE_SOURCE, USER,
+                               FakeKestra)
+
+from kestra_oncall import cli, register
+from kestra_oncall.commands import Commands, parse_command
+from kestra_oncall.hooks import ApprovalHook
+from kestra_oncall.settings import PLUGIN, Settings, SettingsError
+from kestra_oncall.tools import SCHEMAS, Toolbox
 
 ROOT = Path(__file__).resolve().parents[2]
-# The core-owned conftest supplies this alias once it lands. This bootstrap also
-# lets glue's contract tests run while the independently owned core is absent.
-if "kestra_oncall" not in sys.modules:
-    spec = importlib.util.spec_from_file_location("kestra_oncall", ROOT / "__init__.py", submodule_search_locations=[str(ROOT)])
-    package = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = package
-    spec.loader.exec_module(package)
-
-from kestra_oncall import register
-from kestra_oncall import cli
-from kestra_oncall.commands import Commands, parse_command
-from kestra_oncall.hooks import ApprovalHook, ApprovalStore
-from kestra_oncall.settings import Runtime, Settings, SettingsError, require_attended
-from kestra_oncall.tools import SCHEMAS, Toolbox, validate_args
-
-SECRET = "glue-test-private-credential-never-display"
-SOURCE = "id: orders\nnamespace: hko.gluetest\ntasks: []\n"
-SHA = hashlib.sha256(SOURCE.encode()).hexdigest()
-ARGS = {"incident_id": "INC-1234abcd", "proposal_sha256": SHA}
-PAUSE_ARGS = {"execution_id": "exec-pause", "paused_task_run_id": "tr-pause", "action": "resume", "inputs": {"approved": "true"}}
+SECRET = PASSWORD
+SHA_UNKNOWN = "f" * 64
 
 
 class FakeContext:
+    """Records registrations like Hermes's PluginContext and dispatches straight to handlers."""
+
     def __init__(self, settings=None):
         self.settings = settings or {}
         self.tools, self.hooks, self.commands, self.cli_commands, self.skills = {}, {}, {}, {}, {}
@@ -69,70 +61,92 @@ class FakeContext:
         return self.tools[name]["handler"](args)
 
 
-class FakeOncall:
-    """Temporary contract stand-in, replaced by real core in the integration fixture."""
+class Env:
+    """One fake Kestra with a failing flow, the production Toolbox and a profile-scoped database."""
 
-    def __init__(self):
-        self.incident = {"incident_id": ARGS["incident_id"], "namespace": "hko.gluetest", "flow_id": "orders", "status": "proposed", "protected": False,
-                         "proposal": {"proposal_sha256": SHA, "new_source": SOURCE, "base_revision": 2,
-                                      "diff": "--- old\n+++ new\n-old_column\n+new_column\n", "diff_stat": {"added": 1, "removed": 1}, "rationale": "Column was renamed."}}
-        self.writes = []
+    def __init__(self, fake: FakeKestra, protected=()):
+        self.fake = fake
+        fake.put_flow(NS, FLOW, GOOD_SOURCE)
+        fake.add_execution(NS, FLOW, 1, [("extract", "SUCCESS"), ("transform", "SUCCESS")], state="SUCCESS")
+        fake.put_flow(NS, FLOW, BASE_SOURCE)
+        self.failed = fake.add_execution(NS, FLOW, 2, [("extract", "SUCCESS"), ("transform", "FAILED")])
+        self.exec_id = self.failed["id"]
+        self.ctx = FakeContext({"kestra_url": fake.url, "namespaces": [NS], "protected_flows": list(protected)})
+        self.markers = {"HERMES_SESSION_PLATFORM": "cli", "HERMES_SESSION_ID": "glue-test-session"}
+        self.secrets = {"KESTRA_USERNAME": USER, "KESTRA_PASSWORD": PASSWORD}
+        self.toolbox = Toolbox(self.ctx, secret_reader=lambda: self.secrets, context_reader=lambda: self.markers)
+        self.hook = ApprovalHook(self.toolbox)
+        for name in SCHEMAS:
+            self.ctx.register_tool(name, handler=self.toolbox.handler(name))
 
-    def get_incident(self, incident_id):
-        if incident_id != ARGS["incident_id"]:
-            raise ValueError("Unknown incident. Open the failed execution first.")
-        return copy.deepcopy(self.incident)
+    def call(self, name, args):
+        return json.loads(self.toolbox.call(name, args))
 
-    def open_incident(self, execution_id):
-        return self.get_incident(ARGS["incident_id"])
+    def open(self):
+        return self.call("kestra_incident_open", {"execution_id": self.exec_id})
 
-    def list_incidents(self, **kwargs):
-        return [self.get_incident(ARGS["incident_id"])]
+    def propose(self, source=FIXED_SOURCE, rationale="Reference a task that exists."):
+        incident = self.open()
+        proposal = self.call("kestra_propose_fix", {"incident_id": incident["incident_id"], "new_source": source,
+                                                    "rationale": rationale})
+        assert "error" not in proposal, proposal
+        return {"incident_id": incident["incident_id"], "proposal_sha256": proposal["proposal_sha256"]}, proposal
 
-    def propose_fix(self, incident_id, source, rationale):
-        return self.get_incident(incident_id)["proposal"]
+    def add_pause(self):
+        source = PAUSE_SOURCE
+        self.fake.put_flow("hko.demo", "refunds", source)
+        ex = self.fake.add_execution("hko.demo", "refunds", 1, [("prep", "SUCCESS"), ("approve", "PAUSED")],
+                                     state="PAUSED", inputs={"amount": 250})
+        return {"execution_id": ex["id"], "paused_task_run_id": ex["taskRunList"][1]["id"],
+                "action": "resume", "inputs": {"approved": "true", "reason": "checked by a human"}}
 
-    def apply_fix(self, incident_id, sha, *, actor):
-        self.writes.append((incident_id, sha, actor))
-        return {"incident_id": incident_id, "status": "verified"}
+    def writes(self) -> int:
+        """Every Kestra mutation the fake saw: flow PUT, replay, resume (not validate) and kill."""
+        fake = self.fake
+        return (fake.count("PUT", "/flows/") + fake.count("POST", "/actions/replay")
+                + fake.count("POST", "/actions/resume") - fake.count("POST", "/actions/resume/validate")
+                + fake.count("DELETE", "/actions/kill"))
 
-    def summary(self):
-        return {"proposed": 1}
+    def revisions(self) -> int:
+        return len(self.fake.flows[(NS, FLOW)])
 
 
-class FakePauseDesk:
-    def __init__(self):
-        self.rows = [{"execution_id": "exec-pause", "paused_task_run_id": "tr-pause", "paused_task_id": "approval",
-                      "namespace": "hko.gluetest", "flow_id": "refund", "description": "Approve this refund?", "inputs": {}}]
-        self.writes = []
+@pytest.fixture(autouse=True)
+def hermes_home(tmp_path):
+    """Real plugin_db() under a throwaway profile; never the rig home and never ~/.hermes."""
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 
-    def list_pauses(self):
-        return copy.deepcopy(self.rows)
-
-    def decide(self, execution_id, task_run_id, action, inputs, *, actor):
-        self.writes.append((execution_id, task_run_id, action, inputs, actor))
-        return {"execution_id": execution_id, "state": "RUNNING", "action": action}
+    token = set_hermes_home_override(tmp_path / "hermes-home")
+    yield tmp_path / "hermes-home"
+    reset_hermes_home_override(token)
 
 
 @pytest.fixture
-def env():
-    ctx = FakeContext({"namespaces": ["hko.gluetest"]})
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    oncall, pauses = FakeOncall(), FakePauseDesk()
-    runtime = Runtime(Settings.from_context(ctx), SimpleNamespace(server_version=lambda: "2.0.9", search_executions=lambda **_: []),
-                      SimpleNamespace(get_proposal=lambda _: None), oncall, pauses, conn)
-    markers = {"HERMES_SESSION_PLATFORM": "cli", "HERMES_SESSION_ID": "glue-test-session"}
+def build():
+    servers = []
 
-    @contextmanager
-    def factory(_ctx, _secrets):
-        yield runtime
+    def make(**kwargs):
+        server = FakeKestra().start()
+        servers.append(server)
+        return Env(server, **kwargs)
 
-    toolbox = Toolbox(ctx, runtime_factory=factory, secret_reader=lambda: {"KESTRA_PASSWORD": SECRET}, context_reader=lambda: markers)
-    hook = ApprovalHook(toolbox)
-    for name in SCHEMAS:
-        ctx.register_tool(name, handler=toolbox.handler(name))
-    yield SimpleNamespace(ctx=ctx, toolbox=toolbox, hook=hook, runtime=runtime, markers=markers, oncall=oncall, pauses=pauses)
-    conn.close()
+    yield make
+    for server in servers:
+        try:
+            server.stop()
+        except Exception:  # a test may have stopped it to simulate an outage
+            pass
+
+
+@pytest.fixture
+def env(build):
+    return build()
+
+
+def stored_db():
+    from plugins.plugin_storage import plugin_db
+
+    return plugin_db(PLUGIN)
 
 
 def test_manifest_registration_and_json_schemas():
@@ -172,91 +186,231 @@ def test_settings_reject_unsafe_or_ambiguous_values(values):
 
 
 @pytest.mark.parametrize("name,args", [
-    ("kestra_apply_fix", {**ARGS, "diff": "trust me"}), ("kestra_apply_fix", {**ARGS, "proposal_sha256": "a"}),
+    ("kestra_apply_fix", {"incident_id": "INC-1234abcd", "proposal_sha256": SHA_UNKNOWN, "diff": "trust me"}),
+    ("kestra_apply_fix", {"incident_id": "INC-1234abcd", "proposal_sha256": "a"}),
     ("kestra_incident_open", {"execution_id": "../../secret"}), ("kestra_incidents", {"limit": True}),
     ("kestra_incidents", {"incident_id": "INC-x", "limit": 2}),
-    ("kestra_pause_decide", {**PAUSE_ARGS, "inputs": {"approved": True}}),
-    ("kestra_pause_decide", {**PAUSE_ARGS, "action": "kill"}),
+    ("kestra_pause_decide", {"execution_id": "e", "paused_task_run_id": "t", "action": "resume", "inputs": {"approved": True}}),
+    ("kestra_pause_decide", {"execution_id": "e", "paused_task_run_id": "t", "action": "kill", "inputs": {"a": "b"}}),
     ("kestra_propose_fix", {"incident_id": "INC-x", "new_source": "x", "rationale": "x" * 2001}),
 ])
 def test_handlers_wrap_invalid_arguments(env, name, args):
-    result = json.loads(env.toolbox.call(name, args))
+    result = env.call(name, args)
     assert set(result) == {"error", "hint"}
-    assert env.oncall.writes == [] and env.pauses.writes == []
+    assert env.writes() == 0 and env.fake.calls == []
 
 
-def test_status_reports_network_failure_and_keeps_stored_summary(env):
-    def down():
-        raise OSError(SECRET)
-    env.runtime.client.server_version = down
-    result = json.loads(env.toolbox.call("kestra_status", {}))
-    assert result["connected"] is False and result["summary"] == {"proposed": 1}
+def test_status_works_when_kestra_is_down_and_keeps_stored_summary(env):
+    incident = env.open()
+    env.fake.stop()
+    result = env.call("kestra_status", {})
+    assert result["connected"] is False and "error" in result and result["policy_ready"] is True
+    assert result["summary"]["incidents"] == {"open": 1} and result["summary"]["total_incidents"] == 1
+    assert incident["incident_id"] in json.dumps(env.call("kestra_incidents", {}))
     assert SECRET not in json.dumps(result)
 
 
-def test_success_and_error_outputs_redact_secrets(env):
-    env.oncall.incident["log"] = f"credential={SECRET}"
-    assert SECRET not in env.toolbox.call("kestra_incident_open", {"execution_id": "failed"})
-    def fail(*args, **kwargs):
-        raise ValueError(f"failure {SECRET}")
-    env.oncall.open_incident = fail
-    result = env.toolbox.call("kestra_incident_open", {"execution_id": "failed"})
-    assert SECRET not in result and "[REDACTED]" in result
+def test_status_connected_reports_version(env):
+    result = env.call("kestra_status", {})
+    assert result["connected"] is True and result["version"] == "2.0.9"
+    assert result["summary"]["namespaces"] == [NS]
+
+
+def test_empty_namespace_policy_denies_everything(build):
+    env = build()
+    env.ctx.settings["namespaces"] = []
+    result = env.open()
+    assert set(result) == {"error", "hint"} and "namespace" in result["error"].lower()
+    assert env.writes() == 0
+
+
+def test_outputs_and_errors_redact_secrets(env):
+    env.fake.logs[env.exec_id].append({"level": "ERROR", "taskId": "transform", "message": f"credential={SECRET}",
+                                       "taskRunId": env.failed["taskRunList"][1]["id"], "timestamp": env.fake.tick()})
+    assert SECRET not in env.toolbox.call("kestra_incident_open", {"execution_id": env.exec_id})
+    env.fake.echo_secret_in_errors = True
+    result = env.toolbox.call("kestra_incident_open", {"execution_id": "boom"})
+    assert SECRET not in result and json.loads(result)["error"].startswith("Kestra request failed")
+
+
+def test_unknown_incident_and_not_failed_execution_are_clear_errors(env):
+    unknown = env.call("kestra_incidents", {"incident_id": "INC-00000000"})
+    assert "Unknown incident" in unknown["error"]
+    ok_id = next(e["id"] for e in env.fake.executions.values() if e["state"]["current"] == "SUCCESS")
+    refused = env.call("kestra_incident_open", {"execution_id": ok_id})
+    assert "error" in refused and env.writes() == 0
+
+
+def test_open_and_propose_use_real_core_and_never_write(env):
+    incident = env.open()
+    assert incident["failed_task_id"] == "transform" and incident["newly_opened"] is True
+    assert env.open()["incident_id"] == incident["incident_id"]  # idempotent
+    args, proposal = env.propose()
+    assert proposal["base_revision"] == 2 and "| upper" in proposal["diff"]
+    shown = env.call("kestra_incidents", {"incident_id": args["incident_id"]})
+    assert shown["status"] == "proposed" and shown["proposal"]["proposal_sha256"] == args["proposal_sha256"]
+    listed = env.call("kestra_incidents", {})["incidents"]
+    assert [row["incident_id"] for row in listed] == [args["incident_id"]]
+    assert env.writes() == 0 and env.revisions() == 2
 
 
 def test_hook_approves_exact_stored_proposal(env):
-    directive = env.hook(tool_name="kestra_apply_fix", args=ARGS)
+    args, _ = env.propose()
+    directive = env.hook(tool_name="kestra_apply_fix", args=args)
     assert directive["action"] == "approve"
-    assert all(text in directive["message"] for text in ("hko.gluetest.orders", "Base revision: 2", "-old_column", "+new_column", SHA))
-    assert directive["rule_key"].endswith(SHA)
-    assert ARGS["incident_id"] in directive["rule_key"]
-    assert env.oncall.writes == []
+    message = directive["message"]
+    assert all(text in message for text in (f"{NS}.{FLOW}", "Base revision: 2", "| upper", args["proposal_sha256"]))
+    assert '"added": 1' in message and '"removed": 1' in message
+    assert directive["rule_key"].endswith(args["proposal_sha256"]) and args["incident_id"] in directive["rule_key"]
+    assert env.writes() == 0
 
 
-@pytest.mark.parametrize("args", [{**ARGS, "incident_id": "INC-unknown"}, {**ARGS, "proposal_sha256": "f" * 64}, {**ARGS, "diff": "do not show real diff"}, None])
-def test_hook_blocks_unknown_mismatched_or_forged_proposals(env, args):
-    assert env.hook(tool_name="kestra_apply_fix", args=args)["action"] == "block"
+@pytest.mark.parametrize("mutate", [
+    lambda a: {**a, "incident_id": "INC-00000000"}, lambda a: {**a, "proposal_sha256": SHA_UNKNOWN},
+    lambda a: {**a, "diff": "do not show the real diff"}, lambda a: None,
+])
+def test_hook_blocks_unknown_mismatched_or_forged_proposals(env, mutate):
+    args, _ = env.propose()
+    assert env.hook(tool_name="kestra_apply_fix", args=mutate(args))["action"] == "block"
 
 
-def test_hook_handles_read_tools_and_protected_flow(env):
+def test_hook_blocks_apply_without_a_stored_proposal(env):
+    incident = env.open()
+    block = env.hook(tool_name="kestra_apply_fix", args={"incident_id": incident["incident_id"], "proposal_sha256": SHA_UNKNOWN})
+    assert block["action"] == "block" and "Propose a fix first" in block["message"]
+
+
+def test_hook_ignores_read_tools(env):
     assert env.hook(tool_name="kestra_status", args={}) is None
-    env.oncall.incident["protected"] = True
-    assert env.hook(tool_name="kestra_apply_fix", args=ARGS)["action"] == "block"
+    assert env.hook(tool_name="terminal", args={"command": "ls"}) is None
 
 
-@pytest.mark.parametrize("markers", [{"HERMES_SESSION_PLATFORM": "webhook"}, {"HERMES_CRON_SESSION": "true", "HERMES_SESSION_PLATFORM": "telegram"}, {"HERMES_SINGLE_QUERY_SESSION": "1"}])
+def test_protected_flow_is_diagnosed_but_never_proposed_or_approved(build):
+    env = build(protected=[f"{NS}.{FLOW}"])
+    incident = env.open()
+    assert incident["protected"] is True and incident["failed_task_id"] == "transform"
+    refused = env.call("kestra_propose_fix", {"incident_id": incident["incident_id"], "new_source": FIXED_SOURCE, "rationale": "x"})
+    assert "protected" in refused["error"]
+    # even a proposal that reached the store out of band cannot be approved or applied
+    from kestra_oncall.store import Store
+    from kestra_oncall.incidents import proposal_commitment
+    conn = stored_db()
+    sha = proposal_commitment(incident_id=incident["incident_id"], execution_id=env.exec_id, failed_task_id="transform",
+                              base_revision=2, base_source_sha256="0" * 64, new_source=FIXED_SOURCE)
+    Store(conn).save_proposal(incident["incident_id"], proposal_sha256=sha, base_revision=2, base_source_sha256="0" * 64,
+                              base_source=BASE_SOURCE, new_source=FIXED_SOURCE, rationale="forged", diff="-a\n+b\n",
+                              diff_stat={"added": 1, "removed": 1}, validation=[])
+    conn.close()
+    args = {"incident_id": incident["incident_id"], "proposal_sha256": sha}
+    assert env.hook(tool_name="kestra_apply_fix", args=args)["action"] == "block"
+    assert "protected" in env.call("kestra_apply_fix", args)["error"]
+    assert env.writes() == 0 and env.revisions() == 2
+
+
+@pytest.mark.parametrize("markers", [{"HERMES_SESSION_PLATFORM": "webhook"},
+                                     {"HERMES_CRON_SESSION": "true", "HERMES_SESSION_PLATFORM": "telegram"},
+                                     {"HERMES_SINGLE_QUERY_SESSION": "1"}])
 def test_unattended_writes_block_even_before_host_gate(env, markers):
+    apply_args, _ = env.propose()
+    pause_args = env.add_pause()
+    env.call("kestra_pauses", {})
     env.markers.update(markers)
-    for name, args in (("kestra_apply_fix", ARGS), ("kestra_pause_decide", PAUSE_ARGS)):
+    for name, args in (("kestra_apply_fix", apply_args), ("kestra_pause_decide", pause_args)):
         assert env.hook(tool_name=name, args=args)["action"] == "block"
         assert "Unattended writes" in env.toolbox.call(name, args)
-    assert env.oncall.writes == [] and env.pauses.writes == []
+    assert env.writes() == 0 and env.revisions() == 2
+
+
+def test_apply_end_to_end_through_the_tool_is_verified_and_idempotent(env):
+    args, _ = env.propose()
+    result = env.call("kestra_apply_fix", args)
+    assert result["status"] == "verified" and result["fixed_revision"] == 3
+    assert result["actor"] == "hermes:cli:glue-test-session"
+    assert env.fake.current(NS, FLOW)["source"] == FIXED_SOURCE and len(env.fake.replays_of(env.exec_id)) == 1
+    again = env.call("kestra_apply_fix", args)
+    assert again["noop"] is True and env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1
+
+
+def test_apply_after_out_of_band_edit_is_stale_and_writes_nothing(env):
+    args, _ = env.propose()
+    assert env.hook(tool_name="kestra_apply_fix", args=args)["action"] == "approve"   # the human saw revision 2
+    env.fake.put_flow(NS, FLOW, BASE_SOURCE + "# edited by someone else\n")
+    before = env.writes()
+    result = env.call("kestra_apply_fix", args)
+    assert result["status"] == "stale" and env.writes() == before and env.revisions() == 3
+    assert not env.fake.replays_of(env.exec_id)
+
+
+def test_failed_replay_rolls_back_to_the_base_source(env):
+    args, _ = env.propose()
+    env.fake.replay_state = "FAILED"
+    result = env.call("kestra_apply_fix", args)
+    assert result["status"] == "rolled_back"
+    assert env.fake.current(NS, FLOW)["source"] == BASE_SOURCE and env.revisions() == 4
+
+
+def test_new_base_revision_gets_a_new_rule_key(env):
+    args, _ = env.propose()
+    first = env.hook(tool_name="kestra_apply_fix", args=args)
+    env.fake.put_flow(NS, FLOW, BASE_SOURCE + "# note\n")
+    new_args, _ = env.propose(source=FIXED_SOURCE + "# note\n")
+    second = env.hook(tool_name="kestra_apply_fix", args=new_args)
+    assert new_args["proposal_sha256"] != args["proposal_sha256"]
+    assert first["rule_key"] != second["rule_key"] and "Base revision: 3" in second["message"]
+    stale_old = env.hook(tool_name="kestra_apply_fix", args=args)
+    assert stale_old["action"] == "block"  # the older approval hash no longer matches the latest proposal
 
 
 def test_pause_requires_snapshot_and_uses_frozen_inputs(env):
-    assert env.hook(tool_name="kestra_pause_decide", args=PAUSE_ARGS)["action"] == "block"
-    env.toolbox.call("kestra_pauses", {})
-    directive = env.hook(tool_name="kestra_pause_decide", args=PAUSE_ARGS)
+    pause = env.add_pause()
+    assert env.hook(tool_name="kestra_pause_decide", args=pause)["action"] == "block"
+    listed = env.call("kestra_pauses", {})["pauses"]
+    assert [row["execution_id"] for row in listed] == [pause["execution_id"]]
+    directive = env.hook(tool_name="kestra_pause_decide", args=pause)
     assert directive["action"] == "approve"
-    assert "Approve this refund?" in directive["message"] and '"approved": "true"' in directive["message"]
-    mutated = {**PAUSE_ARGS, "inputs": {"approved": "false"}}
+    assert "Approve a refund of 250 EUR?" in directive["message"] and '"approved": "true"' in directive["message"]
+    mutated = {**pause, "inputs": {"approved": "false"}}
     assert "No current stored pause decision" in env.toolbox.call("kestra_pause_decide", mutated)
-    result = json.loads(env.toolbox.call("kestra_pause_decide", PAUSE_ARGS))
-    assert result["state"] == "RUNNING"
-    assert env.pauses.writes[0][3] == {"approved": "true"}
+    result = env.call("kestra_pause_decide", pause)
+    assert result["status"] == "resumed"
+    assert env.fake.resumed_with == pause["inputs"]
+    assert env.call("kestra_pause_decide", pause)["noop"] is True
 
 
-def test_pause_corrupt_hash_and_stale_task_are_blocked(env):
-    env.toolbox.call("kestra_pauses", {})
-    stale = {**PAUSE_ARGS, "paused_task_run_id": "different-task-run"}
+def test_pause_resumed_elsewhere_after_approval_is_stale_and_writes_nothing(env):
+    pause = env.add_pause()
+    env.call("kestra_pauses", {})
+    assert env.hook(tool_name="kestra_pause_decide", args=pause)["action"] == "approve"
+    env.fake.executions[pause["execution_id"]]["state"]["current"] = "SUCCESS"
+    result = env.call("kestra_pause_decide", pause)
+    assert "error" in result and env.writes() == 0
+
+
+def test_pause_wrong_task_run_corrupt_hash_and_kill(env):
+    pause = env.add_pause()
+    env.call("kestra_pauses", {})
+    stale = {**pause, "paused_task_run_id": "different-task-run"}
     assert env.hook(tool_name="kestra_pause_decide", args=stale)["action"] == "block"
-    env.hook(tool_name="kestra_pause_decide", args=PAUSE_ARGS)
-    conn = env.runtime.conn
+    env.hook(tool_name="kestra_pause_decide", args=pause)
+    conn = stored_db()
     body = json.loads(conn.execute("SELECT body FROM glue_pause_requests").fetchone()[0])
     body["inputs"]["approved"] = "false"
     conn.execute("UPDATE glue_pause_requests SET body=?", (json.dumps(body),))
-    assert "hash mismatch" in env.toolbox.call("kestra_pause_decide", PAUSE_ARGS)
-    assert env.pauses.writes == []
+    conn.commit()
+    conn.close()
+    assert "hash mismatch" in env.toolbox.call("kestra_pause_decide", pause)
+    assert env.writes() == 0
+    kill = {"execution_id": pause["execution_id"], "paused_task_run_id": pause["paused_task_run_id"], "action": "kill"}
+    assert env.hook(tool_name="kestra_pause_decide", args=kill)["action"] == "approve"
+    assert env.call("kestra_pause_decide", kill)["status"] == "killed"
+
+
+def test_pause_in_protected_flow_is_never_decided(build):
+    env = build(protected=["hko.demo.refunds"])
+    pause = env.add_pause()
+    env.call("kestra_pauses", {})
+    assert env.hook(tool_name="kestra_pause_decide", args=pause)["action"] == "block"
+    assert env.writes() == 0
 
 
 def test_command_parsing():
@@ -268,38 +422,57 @@ def test_command_parsing():
 
 
 def test_command_writes_only_after_explicit_gate_and_via_dispatch(env):
+    args, _ = env.propose()
+    pause = env.add_pause()
     commands = Commands(env.ctx, env.toolbox, env.hook, approval=lambda *_: {"approved": False})
-    assert "Not approved" in commands("apply " + ARGS["incident_id"])
-    assert not env.oncall.writes and not any(n == "kestra_apply_fix" for n, _ in env.ctx.dispatched)
+    assert "Not approved" in commands("apply " + args["incident_id"])
+    assert env.writes() == 0 and not any(n == "kestra_apply_fix" for n, _ in env.ctx.dispatched)
     commands.approval = lambda *_: {"approved": True}
-    assert "verified" in commands("apply " + ARGS["incident_id"])
-    assert env.ctx.dispatched[-1] == ("kestra_apply_fix", ARGS)
-    assert env.oncall.writes[0][2] == "hermes:cli:glue-test-session"
-    assert "RUNNING" in commands("resume exec-pause approved=true")
-    assert env.ctx.dispatched[-1][0] == "kestra_pause_decide"
+    assert "verified" in commands("apply " + args["incident_id"])
+    assert env.ctx.dispatched[-1] == ("kestra_apply_fix", args)
+    assert env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1
+    assert "noop" in commands("apply " + args["incident_id"]).lower() or "verified" in commands("apply " + args["incident_id"])
+    assert env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1
+    assert "hko.demo.refunds" in commands("pauses")
+    reply = commands(f"resume {pause['execution_id']} approved=true reason=\"checked by a human\"")
+    assert "resumed" in reply and env.ctx.dispatched[-1][0] == "kestra_pause_decide"
+    assert env.fake.resumed_with == pause["inputs"]
+
+
+def test_command_read_replies_are_short_and_use_real_records(env):
+    args, _ = env.propose()
+    commands = Commands(env.ctx, env.toolbox, env.hook, approval=lambda *_: {"approved": False})
+    status = commands("status")
+    assert "Kestra 2.0.9: connected" in status and "policy ready" in status and "1 proposed" in status
+    listing = commands("incidents")
+    assert args["incident_id"] in listing and "proposed" in listing and f"{NS}.{FLOW}" in listing
+    shown = commands("show " + args["incident_id"])
+    assert args["proposal_sha256"] in shown and f"/kestra apply {args['incident_id']}" in shown and "| upper" in shown
+    assert commands("pauses") == "No paused executions."
+    assert "No unique current pause" in commands("resume nosuchexecution")
+    assert "Unknown incident" in commands("show INC-00000000")
+    assert env.writes() == 0
+
+
+def test_command_show_reports_protected_flow_and_outcome(build):
+    env = build(protected=[f"{NS}.{FLOW}"])
+    incident = env.open()
+    commands = Commands(env.ctx, env.toolbox, env.hook, approval=lambda *_: {"approved": True})
+    assert "Protected flow" in commands("show " + incident["incident_id"])
+    assert "No stored proposal" in commands("apply " + incident["incident_id"])
+    assert env.writes() == 0
 
 
 def test_command_gate_failure_never_dispatches(env):
+    args, _ = env.propose()
+
     def unavailable(*_):
         raise RuntimeError(SECRET)
+
     commands = Commands(env.ctx, env.toolbox, env.hook, approval=unavailable)
-    result = commands("apply " + ARGS["incident_id"])
+    result = commands("apply " + args["incident_id"])
     assert SECRET not in result and "could not complete" in result
-    assert env.oncall.writes == []
-
-
-def test_command_reads_proposal_from_store_when_incident_is_separate(env):
-    proposal = env.oncall.incident.pop("proposal")
-    env.runtime.store.get_proposal = lambda _: proposal
-    commands = Commands(env.ctx, env.toolbox, env.hook, approval=lambda *_: {"approved": True})
-    assert "verified" in commands("apply " + ARGS["incident_id"])
-
-
-def test_rule_cache_does_not_cover_new_base_revision(env):
-    first = env.hook(tool_name="kestra_apply_fix", args=ARGS)
-    env.oncall.incident["proposal"]["base_revision"] += 1
-    second = env.hook(tool_name="kestra_apply_fix", args=ARGS)
-    assert first["rule_key"] != second["rule_key"]
+    assert env.writes() == 0
 
 
 def test_setup_prints_valid_route_and_never_writes_without_apply(env, monkeypatch, capsys):
@@ -314,28 +487,28 @@ def test_setup_prints_valid_route_and_never_writes_without_apply(env, monkeypatc
     route = YAML(typ="safe").load(printed.split("\nKestra forwarder setup:")[0])["platforms"]["webhook"]["extra"]["routes"]["kestra-oncall"]
     assert route["coalesce"]["key"] == "execution_id" and route["mirror_to_session"] is True
     assert route["skills"] == ["kestra-oncall:kestra-oncall"] and route["toolsets"] == ["kestra_oncall"]
-    assert "secret" not in route and "Never apply" in route["prompt"]
+    assert "secret" not in route and "Never apply" in route["prompt"] and "is_replay_of_incident" in route["prompt"]
     cli.run(parser.parse_args(["setup", "--apply"]), env.toolbox)
     assert len(calls) == 1
 
 
-def test_doctor_reports_missing_auth_without_exposing_values(env):
+def test_doctor_against_fake_kestra_reports_each_failure_without_exposing_values(env):
+    env.secrets = {}
     result = cli.doctor(env.toolbox)
     assert result["ok"] is False and result["checks"]["authentication_configured"] is False
-    env.toolbox.secret_reader = lambda: {"KESTRA_USERNAME": "glue-user", "KESTRA_PASSWORD": SECRET}
+    env.secrets = {"KESTRA_USERNAME": USER, "KESTRA_PASSWORD": "wrong-" + SECRET}
     result = cli.doctor(env.toolbox)
-    assert result["ok"] is True and SECRET not in json.dumps(result)
-
-
-def test_doctor_probes_authenticated_endpoint_not_only_public_version(env):
-    env.toolbox.secret_reader = lambda: {"KESTRA_USERNAME": "glue-user", "KESTRA_PASSWORD": SECRET}
-    def refused(**kwargs):
-        raise ValueError(f"authentication failed {SECRET}")
-    env.runtime.client.search_executions = refused
-    result = cli.doctor(env.toolbox)
-    assert result["checks"]["connectivity"] is True
-    assert result["checks"]["authentication_accepted"] is False and result["ok"] is False
+    assert result["ok"] is False and result["checks"]["authentication_accepted"] is False
     assert SECRET not in json.dumps(result)
+    env.secrets = {"KESTRA_USERNAME": USER, "KESTRA_PASSWORD": SECRET}
+    result = cli.doctor(env.toolbox)
+    assert result["ok"] is True and all(result["checks"].values()) and SECRET not in json.dumps(result)
+
+
+def test_doctor_without_namespaces_is_not_ok(env):
+    env.ctx.settings["namespaces"] = []
+    result = cli.doctor(env.toolbox)
+    assert result["ok"] is False and result["checks"]["allowed_namespaces"] is False
 
 
 @pytest.fixture
@@ -351,25 +524,30 @@ def test_real_hermes_gate_displays_stored_diff(env, monkeypatch, hermes_host, an
     import hermes_cli.plugins as plugins
     from tools import approval, approval_context
 
+    args, _ = env.propose()
     prompts = []
     monkeypatch.setattr(plugins, "invoke_hook", lambda name, **kwargs: [env.hook(**kwargs)])
     monkeypatch.setattr(approval, "_yolo_active", lambda: False)
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
     monkeypatch.setattr(approval, "is_approved", lambda *_: False)
+
     def human(command, description, **kwargs):
         prompts.append((command, description))
         return answer
+
     monkeypatch.setattr(approval, "_presence", lambda *_: (human, True, False, False))
-    block = plugins.resolve_pre_tool_block("kestra_apply_fix", ARGS)
+    block = plugins.resolve_pre_tool_block("kestra_apply_fix", args)
     assert (block is None) is allowed
     assert len(prompts) == 1
-    assert "Base revision: 2" in prompts[0][1] and "+new_column" in prompts[0][1] and SHA in prompts[0][1]
+    assert "Base revision: 2" in prompts[0][1] and "| upper" in prompts[0][1] and args["proposal_sha256"] in prompts[0][1]
+    assert env.writes() == 0   # approval alone never writes; the handler does
 
 
 def test_real_hermes_unattended_default_has_no_pending_prompt(env, monkeypatch, hermes_host):
     from tools import approval, approval_context
     from kestra_oncall.commands import request_approval
 
+    args, _ = env.propose()
     monkeypatch.setattr(approval, "_yolo_active", lambda: False)
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
     monkeypatch.setattr(approval, "is_approved", lambda *_: False)
@@ -377,7 +555,7 @@ def test_real_hermes_unattended_default_has_no_pending_prompt(env, monkeypatch, 
     monkeypatch.setattr(approval, "_is_single_query_approval_context", lambda: False)
     monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: True)
     monkeypatch.setattr(approval_context, "_get_cron_approval_mode", lambda: "deny")
-    directive = env.hook(tool_name="kestra_apply_fix", args=ARGS)
+    directive = env.hook(tool_name="kestra_apply_fix", args=args)
     result = request_approval("kestra_apply_fix", directive)
     assert result["approved"] is False and "cron" in result["message"]
     assert "pending_approval" not in result
@@ -389,6 +567,7 @@ def test_real_hermes_command_registry_keeps_approval_gate(env, monkeypatch, herm
     from tools import approval, approval_context
     from kestra_oncall import tools as plugin_tools
 
+    args, _ = env.propose()
     manager = PluginManager(scope_key="glue-command-test")
     ctx = PluginContext(PluginManifest(name="kestra-oncall", path=str(ROOT), source="user"), manager)
     monkeypatch.setattr(plugin_tools, "Toolbox", lambda _ctx: env.toolbox)
@@ -399,16 +578,18 @@ def test_real_hermes_command_registry_keeps_approval_gate(env, monkeypatch, herm
     monkeypatch.setattr(approval, "is_approved", lambda *_: False)
     prompts = []
     answer = ["deny"]
+
     def human(command, description, **kwargs):
         prompts.append(description)
         return answer[0]
+
     monkeypatch.setattr(approval, "_presence", lambda *_: (human, True, False, False))
-    assert "Not approved" in command("apply " + ARGS["incident_id"])
-    assert env.oncall.writes == []
+    assert "Not approved" in command("apply " + args["incident_id"])
+    assert env.writes() == 0 and env.revisions() == 2
     answer[0] = "once"
-    assert "verified" in command("apply " + ARGS["incident_id"])
-    assert len(env.oncall.writes) == 1 and len(prompts) == 2
-    assert all(SHA in prompt and "+new_column" in prompt for prompt in prompts)
+    assert "verified" in command("apply " + args["incident_id"])
+    assert env.revisions() == 3 and len(env.fake.replays_of(env.exec_id)) == 1 and len(prompts) == 2
+    assert all(args["proposal_sha256"] in prompt and "| upper" in prompt for prompt in prompts)
 
 
 def test_real_hermes_setup_writer_is_idempotent_and_preserves_other_routes(monkeypatch, hermes_host, tmp_path):

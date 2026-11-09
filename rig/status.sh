@@ -5,7 +5,7 @@
 if gw_running; then echo "gateway: running pid $(cat "$GW_PID")"; else echo "gateway: stopped"; fi
 echo "webhook (host):      $(curl -s -m 3 http://$WEBHOOK_HOST:$WEBHOOK_PORT/health || echo unreachable)"
 echo "webhook (container): $(docker exec hko-kestra curl -s -m 3 http://$WEBHOOK_HOST:$WEBHOOK_PORT/health || echo unreachable)"
-"$PY" - <<'PYEOF'
+cd "$RIG_DIR"; "$PY" - <<'PYEOF'
 import sys; sys.path.insert(0, '.')
 
 from common import API

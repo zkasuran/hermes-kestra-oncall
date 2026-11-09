@@ -81,7 +81,8 @@ class KestraClient:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
-            text = self._scrub(exc.read().decode("utf-8", "replace"))[:_BODY_LIMIT]
+            with exc:  # close the response body so error paths do not leak a file handle
+                text = self._scrub(exc.read().decode("utf-8", "replace"))[:_BODY_LIMIT]
             raise KestraError(f"Kestra {method} {prefix}{path} failed with HTTP {exc.code}: {text}",
                               status=exc.code, body=text, method=method, path=path) from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:

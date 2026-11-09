@@ -26,7 +26,7 @@ def main() -> None:
     assert probe['state']['current'] == 'SUCCESS', probe['id']
     outputs = api.task_outputs(probe['id'])
     assert outputs['resolve_secrets'][0]['value'] == 'true', 'Secret resolution failed'
-    evidence = {'flows': records, 'secret_probe': {'id': probe['id'], 'state': probe['state']['current'], 'outputs': outputs}, 'configs': api.request('GET', '/api/v1/configs')}
+    evidence = {'flows': records, 'secret_probe': {'id': probe['id'], 'state': probe['state']['current'], 'outputs': outputs}, 'kestra': {k: v for k, v in api.request('GET', '/api/v1/configs').items() if k in ('version', 'edition', 'commitId', 'commitDate')}}
     save_json(ROOT / 'evidence/seed.json', evidence)
     print({'validated_flows': len(records), 'secret_probe': probe['id'], 'state': probe['state']['current']})
 

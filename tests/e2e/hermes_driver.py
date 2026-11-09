@@ -73,8 +73,11 @@ def main() -> int:
     discover_plugins(force=True)
 
     if args.fault == 'crash-before-replay':
-        # The plugin module name is chosen by Hermes at load time; find the loaded client module.
-        KestraClient = next(m.KestraClient for n, m in list(sys.modules.items()) if n.endswith('client') and hasattr(m, 'KestraClient'))
+        # Hermes picks the plugin's module name at load time; find the package, then import its client.
+        import importlib
+        repo = Path(__file__).resolve().parents[2]
+        package = next(n for n, m in list(sys.modules.items()) if hasattr(m, 'register') and getattr(m, '__file__', None) and Path(m.__file__).resolve().parent == repo)
+        KestraClient = importlib.import_module(package + '.client').KestraClient
 
         def die(self, *a, **k):
             sys.stdout.flush()

@@ -21,8 +21,6 @@ def checked_proposal(runtime: Any, args: dict) -> tuple[dict, dict]:
     """Resolve real stored content, never accept a caller-supplied diff or flow name."""
     incident = runtime.oncall.get_incident(args["incident_id"])
     proposal = incident.get("proposal")
-    if not isinstance(proposal, dict):
-        proposal = runtime.store.get_proposal(args["incident_id"])
     if not isinstance(proposal, dict) or not proposal.get("proposal_sha256"):
         raise ValueError("No stored proposal for this incident. Propose a fix first.")
     if not hmac.compare_digest(proposal["proposal_sha256"], args["proposal_sha256"]):
@@ -47,7 +45,7 @@ class ApprovalStore:
             self.conn.execute("DELETE FROM glue_pause_snapshots")
             self.conn.execute("DELETE FROM glue_pause_requests WHERE created < ?", (now - 600,))
             for row in rows:
-                execution_id = row.get("execution_id") or row.get("id")
+                execution_id = row.get("execution_id")
                 if not execution_id:
                     raise ValueError("Pause response has no execution id. Refresh pauses after checking Kestra.")
                 self.conn.execute("INSERT INTO glue_pause_snapshots VALUES (?, ?, ?)",
@@ -62,7 +60,7 @@ class ApprovalStore:
         if row is None or time.time() - row[1] > 600:
             raise ValueError("Unknown or expired pause snapshot. Run kestra_pauses before deciding.")
         pause = json.loads(row[0])
-        task_run = pause.get("paused_task_run_id") or pause.get("task_run_id") or pause.get("taskRunId")
+        task_run = pause.get("paused_task_run_id")
         if task_run != args["paused_task_run_id"]:
             raise ValueError("Paused task run changed. Refresh kestra_pauses and review the current question.")
         if pause.get("protected"):
@@ -88,16 +86,10 @@ class ApprovalStore:
 
 
 def _flow(record: dict) -> str:
-    namespace = record.get("namespace") or record.get("flow_namespace")
-    flow_id = record.get("flow_id") or record.get("flowId")
-    flow = record.get("flow")
-    if isinstance(flow, dict):
-        namespace = namespace or flow.get("namespace")
-        flow_id = flow_id or flow.get("id") or flow.get("flow_id")
+    """Core incident and pause records carry namespace and flow_id; pause rows also carry `flow`."""
+    namespace, flow_id = record.get("namespace"), record.get("flow_id")
     if namespace and flow_id:
         return f"{namespace}.{flow_id}"
-    if isinstance(flow, str) and flow:
-        return flow
     raise ValueError("Stored record has no flow identity. Refresh the incident or pause.")
 
 
@@ -136,8 +128,8 @@ class ApprovalHook:
                     rule_key = f"kestra-oncall:{tool_name}:{sha}"
                     message = (f"{request['action'].capitalize()} {_flow(pause)}?\n"
                                f"Execution: {request['execution_id']}\nPaused task run: {request['paused_task_run_id']}\n"
-                               f"Paused task: {pause.get('paused_task_id') or pause.get('task_id') or '(see task run)'}\n"
-                               f"Question (untrusted flow text): {_preview(str(pause.get('description') or pause.get('pause_description') or ''))}\n"
+                               f"Paused task: {pause.get('paused_task_id') or '(see task run)'}\n"
+                               f"Question (untrusted flow text): {_preview(str(pause.get('description') or ''))}\n"
                                f"Inputs: {json.dumps(redact(request['inputs'], secrets), ensure_ascii=True, sort_keys=True)}\n"
                                f"Decision SHA-256: {sha}\nLive pause state is checked again immediately before the write.")
             return {"action": "approve", "message": redact(message, secrets), "rule_key": rule_key}

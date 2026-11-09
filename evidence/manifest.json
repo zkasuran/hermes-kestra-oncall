@@ -1,0 +1,245 @@
+{
+  "generated": "2026-11-09T10:02:30+0530",
+  "versions": {
+    "kestra": "2.0.9",
+    "hermes_commit": "c3354ea19991d90a7d6b605da03d0241b4208a79",
+    "plugin_repo_head": "e38277de5203e8cbbe5cd0b1bf2db55adccd40b3",
+    "plugin_repo_dirty_files": 17,
+    "model": "gpt-6-astra (fallbacks gpt-6.1-sol, gpt-5.6-sol) via the local OpenAI-compatible pool, Responses API"
+  },
+  "files_sha256": {
+    "__init__.py": "f1e02a063635d666c1d1b3b0660033aa3bdcb5beb73a7c877bb568466cfba1d0",
+    "plugin.yaml": "bf8da9793358a5e487be2a6dbc6466524258f70878fc27b71cd77c190bccb74c",
+    "settings.py": "8d979a6e490b18d1339b80ae289ec35e74e2f1a6e8c38f43b938b491bb899a20",
+    "tools.py": "4d235e98767ad67a37e5f2395a87c93bd85bd6ea0be640992b644c4942b68e6a",
+    "hooks.py": "b5807a17288b1d0a5dbdab33ea94cc60dbd672a8f3832c08f0704975dce5b64a",
+    "commands.py": "b9ba4fea6b30097fc8b2c620a5369621072a9538d5149138cbf5031ffda0df5e",
+    "cli.py": "ec3c90314db42205168d528dfbfaf3e53323623785ba9904edf5e74b39a0f2ed",
+    "client.py": "297bca1ceb09c67a004eac3235b66ffa018c744447ec0fb5b8c6fb33b787db86",
+    "store.py": "81729070a77f20acad8b1759679d0fd330965aadafcc3e4eb3c14bdc71cc7e1b",
+    "flowsrc.py": "8335c55763ed460726dadeb7719620cd20e8ab3585a9f021e01ea9cdeba54dc7",
+    "incidents.py": "bbafc4de33c3617c4b8b30d14ab13b2391a44b5e003b65bf88c3b57cb3af93bc",
+    "pauses.py": "ebf91945fb9b6e1af14b659fbb016296506000d04cdf6c92c565f662560e4c08",
+    "skills/kestra-oncall/SKILL.md": "a24cd381e586b9115ee821aa49b9d28899c0b6d418e6942ce09d1c1bdf4d4fa4",
+    "kestra/flows/hermes_oncall_forwarder.yaml": "66ca99997bfbe68dfbadb37096efe890212873eaf1348fe63d035a6f35a48a66",
+    "kestra/flows/secret_probe.yaml": "ad32ca6f34dd6943722161974983d607cc5d92e3c1936ff3a712ee59eb4e3a32",
+    "kestra/demo/orders_etl.yaml": "d536b51b946546eadfb2993ac02c393de103055dbadf2b4951ec5fa9bc31cd19",
+    "kestra/demo/refund_approval.yaml": "fadcf519cbc8d8703b64e13e26f85ab543ae225e7a21407a198b4390ddec3f0e",
+    "kestra/demo/healthy_report.yaml": "ada645288292097dc3065f42039dd85fa23f0080eb18b0ab71612828a4346f79",
+    "kestra/demo/protected_ledger.yaml": "64ed6ed229b5f09841ff6ca57f87ec86125e1dfbc17d66f7bc034fbd3e67d310",
+    "kestra/demo/lookalike_orders.yaml": "cd17fe413e1df5808c9bd9745d3c0f8279b92506829ad99a712c95006831d65f",
+    "rig/common.py": "a78664bbc2ca3682a026288dd805bb843c2c3ab2f85ab2c73717f558c54a64d9",
+    "rig/hermes_home.py": "9f72070dd6777f129e5b197bd930a32344d6c2a80798c2541d785b7aa4b2f6fa",
+    "rig/deps.py": "3f2e08b90b67b34fdb9885707a3638c315e5df1f8189a70379ea79df3b9bc8c3",
+    "rig/seed.py": "16423aa2630def0eb67e50e8d78fa4be2c68be0ce06bc399c874be98147c6e49",
+    "rig/reset.py": "3072bda343dd2af9b643db8f7989ab876641b4723c0b694857fbfc0f340b0f4e",
+    "rig/up.sh": "197df0d535582f4616b24a9fc24767158ae7d7e142f73f6182bddf8e785998dd",
+    "rig/down.sh": "9dd86cfce34ea696a8b564d31ad87ee3640fde7b7e8894567c582164e142e3e3",
+    "rig/status.sh": "a9c99bc1542c322aa764006749d656005499b073f92aa60b9aa154ec2d05eb00",
+    "rig/seed.sh": "b699e5f2637df8014b90a27fe60f4b0ea7f3d22d685d22317b4293ea5af01d21",
+    "rig/reset.sh": "a6252b29d1f95626781d44c5e5f1bef5b8347260330a120054dcd8bbab524e58",
+    "rig/_env.sh": "dbab96e4ff426411952f340c2dc093b5be0dd9ccbccf71ee785189269870ffba",
+    "tests/e2e/run_e2e.py": "c393e8c132b3a0ff7dba3b431f26470c24d24bd3c1fbea64a054acd945d38235",
+    "tests/e2e/hermes_driver.py": "624d20c3c5afda67fadb4d3418a057726abb3cd9581d4acea907d4db1e7231bc",
+    "evidence/make_manifest.py": "282d49fad79f9d8faae71e2bbf172c1fffcce2bfd9f48ce8820dc49a24416467"
+  },
+  "flows_in_kestra_at_manifest_time": {
+    "hko.demo.orders_etl": {
+      "revision": 18,
+      "source_sha256": "96cebbe43118186e11ff722f9e058d87499758baddf5868eb4dc71ba78faa443",
+      "disabled": false
+    },
+    "hko.demo.refund_approval": {
+      "revision": 14,
+      "source_sha256": "fadcf519cbc8d8703b64e13e26f85ab543ae225e7a21407a198b4390ddec3f0e",
+      "disabled": false
+    },
+    "hko.demo.healthy_report": {
+      "revision": 13,
+      "source_sha256": "ada645288292097dc3065f42039dd85fa23f0080eb18b0ab71612828a4346f79",
+      "disabled": false
+    },
+    "hko.demo.protected_ledger": {
+      "revision": 13,
+      "source_sha256": "64ed6ed229b5f09841ff6ca57f87ec86125e1dfbc17d66f7bc034fbd3e67d310",
+      "disabled": false
+    },
+    "hko.lookalike.orders_etl": {
+      "revision": 13,
+      "source_sha256": "cd17fe413e1df5808c9bd9745d3c0f8279b92506829ad99a712c95006831d65f",
+      "disabled": false
+    },
+    "hko.system.hermes_oncall_forwarder": {
+      "revision": 27,
+      "source_sha256": "b373c0d6521eb8b42e2584647221dcf1555f464646389396039a7bf98e75a728",
+      "disabled": false
+    },
+    "hko.system.secret_probe": {
+      "revision": 13,
+      "source_sha256": "ad32ca6f34dd6943722161974983d607cc5d92e3c1936ff3a712ee59eb4e3a32",
+      "disabled": false
+    },
+    "hko.e2e.e2e_orders_stale": {
+      "revision": 19,
+      "source_sha256": "9928d41ec1e074c4bcae937dd16ed0ace0da28794684abb6c614933b90afdcbd",
+      "disabled": false
+    },
+    "hko.e2e.e2e_orders_rollback": {
+      "revision": 19,
+      "source_sha256": "cca1d5bd8c266edeba538c897e784c0a14fb9d74e634ee19d97cfdaf750f5940",
+      "disabled": false
+    },
+    "hko.e2e.e2e_orders_crash": {
+      "revision": 15,
+      "source_sha256": "3cb9f7221974f00e557e05b0fda47e6bf49042256b8cd8cac674c0412140f118",
+      "disabled": false
+    }
+  },
+  "inputs_redacted": {
+    "kestra_url": "http://127.0.0.1:28090",
+    "tenant": "main",
+    "namespaces": [
+      "hko.demo",
+      "hko.e2e"
+    ],
+    "protected_flows": [
+      "hko.demo.protected_ledger"
+    ],
+    "webhook": "http://10.250.90.1:28644/webhooks/kestra-oncall",
+    "credentials": "[REDACTED] (Kestra basic auth, X-Gitlab-Token, LLM key)"
+  },
+  "results": {
+    "all_passed": true,
+    "seconds": 287.4,
+    "per_scenario": {
+      "S1": {
+        "passed": true,
+        "assertions_ok": 19,
+        "assertions_total": 19
+      },
+      "S1b": {
+        "passed": true,
+        "assertions_ok": 4,
+        "assertions_total": 4
+      },
+      "S2": {
+        "passed": true,
+        "assertions_ok": 23,
+        "assertions_total": 23
+      },
+      "S3": {
+        "passed": true,
+        "assertions_ok": 5,
+        "assertions_total": 5
+      },
+      "S6a": {
+        "passed": true,
+        "assertions_ok": 8,
+        "assertions_total": 8
+      },
+      "S4": {
+        "passed": true,
+        "assertions_ok": 11,
+        "assertions_total": 11
+      },
+      "S5": {
+        "passed": true,
+        "assertions_ok": 11,
+        "assertions_total": 11
+      },
+      "S7": {
+        "passed": true,
+        "assertions_ok": 16,
+        "assertions_total": 16
+      },
+      "S8": {
+        "passed": true,
+        "assertions_ok": 8,
+        "assertions_total": 8
+      },
+      "S6b": {
+        "passed": true,
+        "assertions_ok": 15,
+        "assertions_total": 15
+      }
+    }
+  },
+  "execution_ids_by_scenario": {
+    "S1": {
+      "failing": "eynzDfbvDZpAGrpC37HTu",
+      "healthy": "4nO193EMig4uaWg27npJck",
+      "lookalike": "1EdWDLnB0VfJ00dZHN1U5P",
+      "protected": "5FpaT336gr0vVkO8AsRvUF",
+      "forwarder_executions": {
+        "5FpaT336gr0vVkO8AsRvUF": "7JSGwlYBiyyMYt4pGaVKzr",
+        "eynzDfbvDZpAGrpC37HTu": "5oVjWuPtNFESQZ6KTz9FEv"
+      },
+      "incident": "INC-a62437ab",
+      "protected_incident": "INC-20eb594e"
+    },
+    "S1b": {
+      "selffail_execution": "44dom5SUaeKKYtkn642cLC"
+    },
+    "S2": {
+      "original_execution": "eynzDfbvDZpAGrpC37HTu",
+      "replay_execution": "4EfqGDx2uT98IC9ZT9Ssyv"
+    },
+    "S3": {},
+    "S6a": {
+      "flow": "hko.e2e.e2e_orders_crash",
+      "original_execution": "40R83838QCg1tqO5HRhu2F",
+      "incident": "INC-e1e8aa8f"
+    },
+    "S4": {
+      "flow": "hko.e2e.e2e_orders_stale",
+      "original_execution": "2CMuWWIG4ClxuF4tq2Ga8B",
+      "incident": "INC-27a639e4",
+      "proposal_sha256": "c485b1d3fd6865f9bcb79a89435a8a3847368f6549525f3eff420e9499c89659"
+    },
+    "S5": {
+      "flow": "hko.e2e.e2e_orders_rollback",
+      "original_execution": "6iSSCvQbVIbQhmpUYdw9j4",
+      "incident": "INC-4f10f7c9",
+      "replay_execution": "MI1ZPh9KO23gfBaHMxKnu"
+    },
+    "S7": {
+      "execution": "7D4Rbokw44h2Xk9PYdJhs9",
+      "flow": "hko.demo.refund_approval",
+      "stale_execution": "2DzAICuH75TIggO73bzjbs",
+      "killed_execution": "77VEjIintzZsWRcvzkMX12"
+    },
+    "S8": {
+      "flow": "hko.e2e.e2e_orders_concurrent",
+      "original_execution": "5tgCaUU0e8TzIUp8cqa905",
+      "incident": "INC-1651cc58",
+      "replay_execution": "4aomI9csCU3pCFK20kz0i1"
+    },
+    "S6b": {
+      "original_execution": "40R83838QCg1tqO5HRhu2F",
+      "replay_execution": "69TNOjVgBXwUx0SFfQS7te"
+    }
+  },
+  "logs": [
+    "evidence/logs/gateway_model_tools.txt",
+    "evidence/logs/s1_gateway.txt"
+  ],
+  "result_files": [
+    "evidence/e2e-results.json",
+    "evidence/seed.json"
+  ],
+  "commands": [
+    "rig/reset.sh --yes",
+    "rig/up.sh",
+    "python tests/e2e/run_e2e.py",
+    "python evidence/make_manifest.py"
+  ],
+  "unverified_gaps": [
+    "The human approval prompt is answered by a scripted callback registered through Hermes terminal_tool.set_approval_callback; the real approval gate, hook and registry run, but no person clicked a TUI or chat card in this run.",
+    "The model-driven webhook run (S1) depends on a shared LLM pool that rate-limits gpt-6-astra; the run fell back to gpt-6.1-sol when the primary was limited (see the gateway log lines in evidence/logs).",
+    "S4 to S6 use scripted proposals (not model written) on hko.e2e copies of orders_etl, with the forwarder paused for those scenarios, so the model cannot race the scripted proposal. S1 to S3 use the model proposal on hko.demo.orders_etl.",
+    "S6 simulates the interruption by killing the apply process at the replay call (fault injected by the test driver into KestraClient.replay); a power loss or SIGKILL at other points is not exercised.",
+    "Concurrent apply (S8) uses two processes on one machine sharing one SQLite store; separate hosts with separate stores would not share the lock.",
+    "Hermes v0.23.0 was not used for the live run (validate and doctor on v0.23.0 are recorded by agent glue).",
+    "Kestra OSS with basic auth only; EE namespaces, RBAC and API tokens are untested."
+  ]
+}

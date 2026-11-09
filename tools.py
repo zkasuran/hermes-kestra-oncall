@@ -117,12 +117,7 @@ class Toolbox:
             return oncall.open_incident(args["execution_id"])
         if name == "kestra_incidents":
             if "incident_id" in args:
-                incident = oncall.get_incident(args["incident_id"])
-                if not incident.get("proposal"):
-                    proposal = runtime.store.get_proposal(args["incident_id"])
-                    if proposal:
-                        incident = {**incident, "proposal": proposal}
-                return incident
+                return oncall.get_incident(args["incident_id"])
             return {"incidents": oncall.list_incidents(status=args.get("status"), limit=args.get("limit", 20))}
         if name == "kestra_propose_fix":
             return oncall.propose_fix(args["incident_id"], args["new_source"], args["rationale"])
