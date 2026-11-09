@@ -1,0 +1,38 @@
+id: orders_etl
+namespace: demo
+description: A supplier renamed amount to total_amount in the daily order CSV.
+tasks:
+  - id: extract
+    type: io.kestra.plugin.core.storage.Write
+    extension: .csv
+    content: |
+      order_id,total_amount
+      A100,12.50
+      A101,7.25
+      A102,30.00
+  - id: transform
+    type: io.kestra.plugin.scripts.python.Script
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    inputFiles:
+      orders.csv: "{{ outputs.extract.uri }}"
+    outputFiles:
+      - summary.json
+    script: |
+      import csv
+      import json
+      from decimal import Decimal
+      from pathlib import Path
+
+      with open("orders.csv", newline="") as handle:
+          rows = list(csv.DictReader(handle))
+      column = "amount"
+      if column not in rows[0]:
+          raise ValueError(f"Supplier CSV schema changed: missing column {column!r}; available columns: {list(rows[0])}. Update the transform column mapping.")
+      total = sum(Decimal(row[column]) for row in rows)
+      Path("summary.json").write_text(json.dumps({"orders": len(rows), "total": str(total)}))
+      print(f"Validated {len(rows)} orders with total {total}")
+  - id: load
+    type: io.kestra.plugin.core.storage.Write
+    extension: .json
+    content: "{{ read(outputs.transform.outputFiles['summary.json']) }}"

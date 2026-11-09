@@ -1,0 +1,7 @@
+id: protected_ledger
+namespace: demo
+description: Protected accounting ledger. Diagnose only, never patch or replay.
+tasks:
+  - id: ledger_guard
+    type: io.kestra.plugin.core.execution.Fail
+    errorMessage: Protected ledger reconciliation needs the finance operator.

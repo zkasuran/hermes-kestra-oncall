@@ -1,0 +1,41 @@
+/* Kestra on-call tab. Uses the dashboard theme tokens so every theme works. */
+.ko-page { display: flex; flex-direction: column; gap: 1rem; max-width: 62rem; padding: 0.25rem 0 2rem; }
+.ko-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+.ko-h1 { font-size: 1.35rem; font-weight: 600; margin: 0 0 0.5rem; }
+.ko-h2 { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; font-weight: 600; margin: 0 0 0.6rem; }
+.ko-actions { display: flex; gap: 0.5rem; }
+.ko-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.ko-badge { display: inline-flex; align-items: center; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.72rem;
+  border: 1px solid var(--color-border); color: var(--color-muted-foreground); white-space: nowrap; }
+.ko-good { color: #3fb27f; border-color: #3fb27f; }
+.ko-bad { color: #e5534b; border-color: #e5534b; }
+.ko-warn { color: #d9a441; border-color: #d9a441; }
+.ko-info { color: #5b9bd5; border-color: #5b9bd5; }
+.ko-section { display: flex; flex-direction: column; gap: 0.75rem; }
+.ko-card { margin-bottom: 0.75rem; }
+.ko-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.95rem; word-break: break-all; }
+.ko-body { display: flex; flex-direction: column; gap: 0.75rem; }
+.ko-facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 1rem; margin: 0; font-size: 0.8rem; }
+.ko-facts dt { color: var(--color-muted-foreground); }
+.ko-facts dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
+.ko-subhead { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.3rem; }
+.ko-rationale { font-size: 0.85rem; margin: 0; }
+.ko-note, .ko-empty { font-size: 0.78rem; color: var(--color-muted-foreground); margin: 0; }
+.ko-alert { border: 1px solid #d9a441; color: var(--color-foreground); background: color-mix(in srgb, #d9a441 12%, transparent);
+  padding: 0.5rem 0.75rem; border-radius: var(--radius, 0.4rem); font-size: 0.8rem; }
+.ko-diff, .ko-log { margin: 0; padding: 0.5rem 0; overflow-x: auto; font-family: ui-monospace, monospace; font-size: 0.75rem;
+  border: 1px solid var(--color-border); border-radius: var(--radius, 0.4rem); background: var(--color-card); }
+.ko-log { padding: 0.5rem 0.75rem; max-height: 9rem; white-space: pre-wrap; word-break: break-word; color: var(--color-muted-foreground); }
+.ko-line { padding: 0 0.75rem; white-space: pre; }
+.ko-line-add { background: color-mix(in srgb, #3fb27f 18%, transparent); }
+.ko-line-del { background: color-mix(in srgb, #e5534b 18%, transparent); }
+.ko-line-hunk { color: #5b9bd5; }
+.ko-line-file { color: var(--color-muted-foreground); }
+.ko-hash { font-size: 0.72rem; color: var(--color-muted-foreground); word-break: break-all; }
+.ko-command { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.ko-code { flex: 1; font-family: ui-monospace, monospace; font-size: 0.78rem; padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-border); border-radius: var(--radius, 0.4rem); word-break: break-all; user-select: all; }
+.ko-input-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; margin-bottom: 0.2rem; }
+.ko-page code { background: transparent; color: inherit; padding: 0; font-family: ui-monospace, monospace; }
+.ko-page .ko-code { background: var(--color-card); color: var(--color-foreground); padding: 0.3rem 0.5rem; }
+.ko-result { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.8rem; }

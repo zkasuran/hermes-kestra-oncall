@@ -1,0 +1,7 @@
+id: orders_etl
+namespace: demo_lookalike
+description: Outside the allowed namespaces. Must never trigger on-call.
+tasks:
+  - id: transform
+    type: io.kestra.plugin.core.execution.Fail
+    errorMessage: Lookalike supplier schema failure outside on-call scope.
